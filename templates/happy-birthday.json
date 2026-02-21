@@ -1,0 +1,30 @@
+{
+  "templateId": "happy-birthday",
+  "name": "Happy Birthday",
+  "templateType": "frame",
+  "pngUrl": "happy birthday.png",
+  "anchorMode": "bbox_center",
+  "dimensions": {
+    "width": 400,
+    "height": 600
+  },
+  "slots": [
+    {
+      "slotId": "main",
+      "x": 45,
+      "y": 85,
+      "width": 315,
+      "height": 415,
+      "anchor": {
+        "targetX": 200,
+        "targetY": 290
+      },
+      "zIndex": 0
+    }
+  ],
+  "metadata": {
+    "category": "birthday",
+    "tags": ["birthday", "celebration", "party"],
+    "author": "Cloudplay XP"
+  }
+}

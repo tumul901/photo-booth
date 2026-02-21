@@ -1,0 +1,34 @@
+{
+  "templateId": "lays-ranbir",
+  "name": "Lays Promo",
+  "templateType": "sticker",
+  "compositeMode": "background",
+  "pngUrl": "Ranbir-kapoor1.jpg.jpeg",
+  "anchorMode": "none",
+  "dimensions": {
+    "width": 1920,
+    "height": 1080
+  },
+  "slots": [
+    {
+      "slotId": "main",
+      "x": 0,
+      "y": 80,
+      "width": 800,
+      "height": 1000,
+      "anchor": {
+        "targetX": 400,
+        "targetY": 350
+      },
+      "desiredFaceRatio": 0.30,
+      "minZoom": 0.5,
+      "maxZoom": 2.5,
+      "zIndex": 0
+    }
+  ],
+  "metadata": {
+    "category": "brand",
+    "tags": ["lays", "promo", "chips"],
+    "author": "CloudPlay XP"
+  }
+}

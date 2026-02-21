@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Photobooth Template Metadata",
+  "type": "object",
+  "required": ["templateId", "name", "pngUrl", "slots"],
+  "properties": {
+    "templateId": { "type": "string" },
+    "name": { "type": "string" },
+    "pngUrl": { "type": "string" },
+    "anchorMode": { 
+      "type": "string", 
+      "enum": ["bbox_center", "face_center", "eyes", "none"],
+      "default": "bbox_center"
+    },
+    "dimensions": {
+      "type": "object",
+      "properties": {
+        "width": { "type": "integer", "default": 1200 },
+        "height": { "type": "integer", "default": 1600 }
+      }
+    },
+    "slots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "x", "y", "width", "height"],
+        "properties": {
+          "id": { "type": "string" },
+          "x": { "type": "integer" },
+          "y": { "type": "integer" },
+          "width": { "type": "integer" },
+          "height": { "type": "integer" },
+          "zIndex": { "type": "integer", "default": 0 },
+          "anchorTarget": {
+            "type": "object",
+            "properties": {
+              "x": { "type": "number", "description": "Absolute pixels or relative 0.0-1.0" },
+              "y": { "type": "number", "description": "Absolute pixels or relative 0.0-1.0" }
+            }
+          },
+          "desiredFaceRatio": {
+             "type": "number",
+             "description": "Target face height as a ratio of slot height (e.g., 0.35)" 
+          },
+          "minZoom": { "type": "number", "default": 0.5 },
+          "maxZoom": { "type": "number", "default": 3.0 }
+        }
+      }
+    }
+  }
+}

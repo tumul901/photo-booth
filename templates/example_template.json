@@ -1,0 +1,30 @@
+{
+  "templateId": "party-frame-001",
+  "name": "Party Photo Frame",
+  "templateType": "sticker",
+  "pngUrl": "templates/party-frame-001.png",
+  "anchorMode": "face_center",
+  "dimensions": {
+    "width": 1200,
+    "height": 1600
+  },
+  "slots": [
+    {
+      "slotId": "main",
+      "x": 100,
+      "y": 200,
+      "width": 1000,
+      "height": 1000,
+      "anchor": {
+        "targetX": 500,
+        "targetY": 400
+      },
+      "zIndex": 0
+    }
+  ],
+  "metadata": {
+    "category": "party",
+    "tags": ["celebration", "birthday", "fun"],
+    "author": "Photobooth Team"
+  }
+}

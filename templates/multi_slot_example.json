@@ -1,0 +1,42 @@
+{
+  "templateId": "duo-strip-001",
+  "name": "Duo Photo Strip",
+  "templateType": "sticker",
+  "pngUrl": "templates/duo-strip-001.png",
+  "anchorMode": "face_center",
+  "dimensions": {
+    "width": 600,
+    "height": 1800
+  },
+  "slots": [
+    {
+      "slotId": "top",
+      "x": 50,
+      "y": 50,
+      "width": 500,
+      "height": 500,
+      "anchor": {
+        "targetX": 250,
+        "targetY": 200
+      },
+      "zIndex": 0
+    },
+    {
+      "slotId": "bottom",
+      "x": 50,
+      "y": 600,
+      "width": 500,
+      "height": 500,
+      "anchor": {
+        "targetX": 250,
+        "targetY": 200
+      },
+      "zIndex": 0
+    }
+  ],
+  "metadata": {
+    "category": "strip",
+    "tags": ["duo", "vertical", "classic"],
+    "author": "Photobooth Team"
+  }
+}
