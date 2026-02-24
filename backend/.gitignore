@@ -1,0 +1,15 @@
+# Never commit credentials
+.env
+.env.local
+.env*.local
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.u2net/
+
+# Generated
+outputs/
+data/stats.json
