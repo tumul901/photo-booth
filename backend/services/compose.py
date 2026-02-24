@@ -83,14 +83,14 @@ def load_template_metadata(template_id: str, templates_dir: Optional[str] = None
                 
                 dimensions = data.get("dimensions", {})
                 return TemplateMetadata(
-                    template_id=data.get("id", template_id),
+                    template_id=data.get("templateId", data.get("id", template_id)),
                     name=data.get("name", "Unnamed"),
                     png_path=data.get("png_path", data.get("pngUrl", "")),
                     slots=slots,
                     anchor_mode=data.get("anchorMode", "bbox_center"),
                     width=dimensions.get("width", data.get("width", 1200)),
                     height=dimensions.get("height", data.get("height", 1600)),
-                    template_type=data.get("templateType", "sticker"),
+                    template_type=data.get("templateType", data.get("mode", "sticker")),
                     composite_mode=data.get("compositeMode", "overlay"),
                 )
             except Exception as e:
@@ -260,15 +260,16 @@ class ComposeService:
         """
         Main composition loop.
         
-        Composite Modes:
-        - "overlay": Template placed ON TOP of sticker (template needs transparency/cutouts)
-        - "background": Template placed BEHIND sticker (for branded backgrounds)
+        Frame mode:  Photo BEHIND, frame ON TOP (holes punched at slots)
+        Sticker mode: Uses compositeMode from template JSON
         """
+        from PIL import ImageDraw
+        
         # Canvas
         canvas = Image.new("RGBA", (template_meta.width, template_meta.height), (255, 255, 255, 255))
         
-        # For "background" mode, place template first
-        if template_meta.composite_mode == "background" and template_path and os.path.exists(template_path):
+        # For sticker "background" mode, place template first (behind sticker)
+        if processing_mode == "sticker" and template_meta.composite_mode == "background" and template_path and os.path.exists(template_path):
             template = Image.open(template_path).convert("RGBA")
             if template.size != (template_meta.width, template_meta.height):
                 template = template.resize((template_meta.width, template_meta.height), Image.Resampling.LANCZOS)
@@ -286,24 +287,12 @@ class ComposeService:
             sticker_img = sticker_data["image"]
             landmarks = sticker_data.get("landmarks")
             
-            # --- Pipeline Step 1 is already done by generate.py (RemBG) ---
-            
-            # --- Pipeline Step 2: Tight Crop (if sticker mode) ---
-            if processing_mode == "sticker":
-                # Note: `generate.py` should effectively do this BEFORE detection to be safe, 
-                # but if we do it here, landmarks need to be adjusted.
-                # New plan: generate.py does Crop -> Detect.
-                # So here `sticker_img` is ALREADY cropped.
-                pass 
-                
-            # --- Pipeline Step 3: Fit to Slot (Scaling) ---
-            # We need to scale landmarks proportionally!
+            # Fit to Slot (Scaling)
             img_w_orig, img_h_orig = sticker_img.size
             
             face_h = landmarks.face_height if landmarks else None
             sticker_scaled = self.fit_sticker_to_slot(sticker_img, slot, fit_mode, face_h)
             
-            # Calculate scale factor to update landmarks
             scale_factor = sticker_scaled.width / img_w_orig if img_w_orig > 0 else 1.0
             
             landmarks_scaled = None
@@ -316,25 +305,17 @@ class ComposeService:
                     confidence=landmarks.confidence
                 )
 
-            # --- Pipeline Step 4: Calculate Placement ---
-            # If user manually positioned (Step 2 of Wiz), override logic
+            # Calculate Placement
             if user_position:
-                # Basic manual override logic (simplified for MVP)
-                # We assume manual means "manual", ignore smart fit
-                x, y = 0, 0 # Placeholder for complex manual logic
-                # For now let's skip manual logic in this refactor to focus on AUTO
-                # Re-using old logic:
                 user_scale = user_position.get('scale', 1.0)
                 user_x = user_position.get('x', 0)
                 user_y = user_position.get('y', 0)
                 
-                # Apply extra user scale
                 if user_scale != 1.0:
                     new_w = int(sticker_scaled.width * user_scale)
                     new_h = int(sticker_scaled.height * user_scale)
                     sticker_scaled = sticker_scaled.resize((new_w, new_h), Image.Resampling.LANCZOS)
                 
-                # Simple center placement + offset
                 base_x = slot.x + (slot.width - sticker_scaled.width) // 2
                 base_y = slot.y + (slot.height - sticker_scaled.height) // 2
                 
@@ -343,7 +324,6 @@ class ComposeService:
                 x = base_x + int(user_x * sf)
                 y = base_y + int(user_y * sf)
             else:
-                # AUTO PLACEMENT (The Goal)
                 x, y = self.calculate_placement(
                     sticker_scaled, 
                     slot, 
@@ -351,21 +331,33 @@ class ComposeService:
                     landmarks_scaled
                 )
 
-            # --- Pipeline Step 5: Composite ---
-            # Paste (safe bounds)
-            # x, y can be negative, standard Paste handles it or crop?
-            # PIL paste does NOT handle negative destination well for alpha composition sometimes
-            # But `canvas.paste(im, box, mask)` works.
-            
-            # Since we use alpha mask (sticker itself), it should be fine.
+            # Paste photo onto canvas
             canvas.paste(sticker_scaled, (x, y), sticker_scaled)
 
-        # Template Overlay (only for "overlay" mode - template has cutouts)
-        if template_meta.composite_mode == "overlay" and template_path and os.path.exists(template_path):
-             template = Image.open(template_path).convert("RGBA")
-             if template.size != (template_meta.width, template_meta.height):
-                 template = template.resize((template_meta.width, template_meta.height), Image.Resampling.LANCZOS)
-             canvas = Image.alpha_composite(canvas, template)
+        # --- FRAME MODE: Always place frame ON TOP with holes at slot positions ---
+        if processing_mode == "frame" and template_path and os.path.exists(template_path):
+            print(f"DEBUG Compose: Frame mode — placing frame ON TOP with slot cutouts", flush=True)
+            template = Image.open(template_path).convert("RGBA")
+            if template.size != (template_meta.width, template_meta.height):
+                template = template.resize((template_meta.width, template_meta.height), Image.Resampling.LANCZOS)
+            
+            # Punch transparent holes at slot positions so photo shows through
+            mask = template.getchannel("A").copy()
+            draw = ImageDraw.Draw(mask)
+            for slot in template_meta.slots:
+                draw.rectangle(
+                    [slot.x, slot.y, slot.x + slot.width, slot.y + slot.height],
+                    fill=0  # Fully transparent
+                )
+            template.putalpha(mask)
+            canvas = Image.alpha_composite(canvas, template)
+        
+        # --- STICKER MODE with overlay: Place template on top ---
+        elif processing_mode == "sticker" and template_meta.composite_mode == "overlay" and template_path and os.path.exists(template_path):
+            template = Image.open(template_path).convert("RGBA")
+            if template.size != (template_meta.width, template_meta.height):
+                template = template.resize((template_meta.width, template_meta.height), Image.Resampling.LANCZOS)
+            canvas = Image.alpha_composite(canvas, template)
              
         return canvas
 

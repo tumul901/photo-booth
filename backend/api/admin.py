@@ -46,13 +46,13 @@ async def list_templates():
                 meta = json.load(f)
                 
             # Normalize legacy fields
-            t_id = meta.get("id") or meta.get("templateId")
+            t_id = meta.get("templateId") or meta.get("id")
             if not t_id:
                 continue
                 
             name = meta.get("name", "Unknown")
-            mode = meta.get("mode") or meta.get("templateType", "sticker")
-            png_path = meta.get("png_path") or meta.get("pngUrl", "")
+            mode = meta.get("templateType") or meta.get("mode", "sticker")
+            png_path = meta.get("pngUrl") or meta.get("png_path", "")
             
             # Fix legacy paths
             if png_path.startswith("templates/") or png_path.startswith("templates\\"):
@@ -140,11 +140,23 @@ async def upload_template(
             })
             
         meta = {
-            "id": template_id,
+            "templateId": template_id,
             "name": name,
-            "mode": mode,
+            "templateType": mode,
+            "compositeMode": "overlay" if mode == "frame" else "background",
+            "pngUrl": image_filename,
             "png_path": image_filename,
-            "slots": slots
+            "anchorMode": "bbox_center",
+            "dimensions": {
+                "width": 1200,
+                "height": 1600
+            },
+            "slots": slots,
+            "metadata": {
+                "category": "custom",
+                "tags": [],
+                "author": "Admin"
+            }
         }
         
         with open(meta_path, "w") as f:

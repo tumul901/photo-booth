@@ -1,13 +1,15 @@
 {
-  "total_generated": 35,
+  "total_generated": 54,
   "by_mode": {
-    "frame": 1,
-    "sticker": 34
+    "frame": 11,
+    "sticker": 43
   },
   "by_template": {
-    "happy-birthday": 3,
+    "happy-birthday": 4,
     "lays-ranbir-alt": 5,
-    "kurkure-sara": 27
+    "kurkure-sara": 35,
+    "doritos": 4,
+    "doritos2": 6
   },
-  "last_updated": "2026-02-21T14:44:25.450926"
+  "last_updated": "2026-02-24T16:44:06.119069"
 }

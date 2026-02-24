@@ -1,0 +1,34 @@
+{
+  "templateId": "doritos2",
+  "name": "doritos2",
+  "templateType": "frame",
+  "compositeMode": "overlay",
+  "pngUrl": "doritos2.png",
+  "anchorMode": "bbox_center",
+  "dimensions": {
+    "width": 4167,
+    "height": 4167
+  },
+  "slots": [
+    {
+      "slotId": "slot1",
+      "x": 601,
+      "y": 702,
+      "width": 2965,
+      "height": 2898,
+      "anchor": {
+        "targetX": 1403,
+        "targetY": 898
+      },
+      "desiredFaceRatio": 0.25,
+      "minZoom": 0.5,
+      "maxZoom": 2.5,
+      "zIndex": 0
+    }
+  ],
+  "metadata": {
+    "category": "custom",
+    "tags": [],
+    "author": "Admin"
+  }
+}

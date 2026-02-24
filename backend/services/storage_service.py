@@ -5,7 +5,7 @@ Handles saving generated images and providing QR-ready shareable URLs.
 
 This service abstracts storage providers to allow easy switching:
 - Local filesystem (development)
-- Cloud storage (production: S3, GCS, Azure Blob)
+- AWS S3 (production)
 """
 
 from abc import ABC, abstractmethod
@@ -76,6 +76,13 @@ class StorageProvider(ABC):
         """
         pass
 
+    def get_local_path(self, output_id: str) -> Optional[str]:
+        """
+        Get local filesystem path for an output (if applicable).
+        Only meaningful for LocalStorageProvider; returns None for cloud.
+        """
+        return None
+
 
 class LocalStorageProvider(StorageProvider):
     """
@@ -112,66 +119,88 @@ class LocalStorageProvider(StorageProvider):
         file_ext = format.lower()
         filepath = os.path.join(self.output_dir, f"{output_id}.{file_ext}")
         
-        # TODO: Implement actual save
-        # image.save(filepath, format=format, optimize=True)
+        # Save the image to disk
+        image.save(filepath, format=format, optimize=True)
         
         return StorageResult(
             output_id=output_id,
-            download_url=f"{self.base_url}/api/download/{output_id}.{file_ext}",
-            share_url=f"{self.base_url}/share/{output_id}",
+            download_url=f"{self.base_url}/api/download/{output_id}",
+            share_url=f"{self.base_url}/api/share/{output_id}",
         )
     
     async def get_image(self, output_id: str) -> Optional[bytes]:
         """Retrieve image from local filesystem."""
-        # TODO: Implement file lookup
-        # for ext in ["png", "jpg", "webp"]:
-        #     filepath = os.path.join(self.output_dir, f"{output_id}.{ext}")
-        #     if os.path.exists(filepath):
-        #         with open(filepath, "rb") as f:
-        #             return f.read()
+        for ext in ["png", "jpg", "jpeg", "webp"]:
+            filepath = os.path.join(self.output_dir, f"{output_id}.{ext}")
+            if os.path.exists(filepath):
+                with open(filepath, "rb") as f:
+                    return f.read()
         return None
     
     async def delete_image(self, output_id: str) -> bool:
         """Delete image from local filesystem."""
-        # TODO: Implement deletion
+        for ext in ["png", "jpg", "jpeg", "webp"]:
+            filepath = os.path.join(self.output_dir, f"{output_id}.{ext}")
+            if os.path.exists(filepath):
+                os.remove(filepath)
+                return True
         return False
 
+    def get_local_path(self, output_id: str) -> Optional[str]:
+        """Get local path to an output image file."""
+        for ext in ["png", "jpg", "jpeg", "webp"]:
+            filepath = os.path.join(self.output_dir, f"{output_id}.{ext}")
+            if os.path.exists(filepath):
+                return filepath
+        return None
 
-class CloudStorageProvider(StorageProvider):
+
+class S3StorageProvider(StorageProvider):
     """
-    Cloud storage provider for production.
-    
-    Supports:
-    - AWS S3
-    - Google Cloud Storage
-    - Azure Blob Storage
+    AWS S3 storage provider for production.
     
     Features:
-    - Signed URLs for secure access
-    - CDN integration for fast global delivery
-    - Automatic expiration for storage cost management
+    - Direct upload to S3
+    - Public-read or presigned URLs for downloads
+    - Optional CDN (CloudFront) URL support
     """
     
     def __init__(
         self,
-        provider: str,  # "s3", "gcs", "azure"
         bucket: str,
-        base_cdn_url: Optional[str] = None,
-        share_base_url: str = "https://app.example.com",
+        region: str = "ap-south-1",
+        access_key_id: Optional[str] = None,
+        secret_access_key: Optional[str] = None,
+        cdn_url: Optional[str] = None,
+        base_url: str = "http://localhost:8000",
     ):
         """
-        Initialize cloud storage provider.
+        Initialize S3 storage provider.
         
         Args:
-            provider: Cloud provider type
-            bucket: Bucket/container name
-            base_cdn_url: Optional CDN URL for downloads
-            share_base_url: Base URL for share pages
+            bucket: S3 bucket name
+            region: AWS region
+            access_key_id: AWS access key (uses env/IAM role if None)
+            secret_access_key: AWS secret key (uses env/IAM role if None)
+            cdn_url: Optional CloudFront CDN URL for downloads
+            base_url: API base URL for share page links
         """
-        self.provider = provider
+        import boto3
+
         self.bucket = bucket
-        self.base_cdn_url = base_cdn_url
-        self.share_base_url = share_base_url
+        self.region = region
+        self.cdn_url = cdn_url
+        self.base_url = base_url
+        self.prefix = "outputs/"  # S3 key prefix
+
+        # Build boto3 client kwargs
+        client_kwargs = {"region_name": region}
+        if access_key_id and secret_access_key:
+            client_kwargs["aws_access_key_id"] = access_key_id
+            client_kwargs["aws_secret_access_key"] = secret_access_key
+
+        self.s3 = boto3.client("s3", **client_kwargs)
+        print(f"INFO: S3 storage initialized — bucket={bucket}, region={region}", flush=True)
     
     async def save_image(
         self,
@@ -179,34 +208,67 @@ class CloudStorageProvider(StorageProvider):
         filename: Optional[str] = None,
         format: str = "PNG",
     ) -> StorageResult:
-        """
-        Save image to cloud storage.
-        
-        TODO: Implement cloud upload
-        - Generate signed upload URL
-        - Upload image bytes
-        - Return CDN URL for downloads
-        - Return share page URL for QR codes
-        """
+        """Save image to S3."""
         output_id = filename or f"{uuid.uuid4().hex}"
-        
-        # Placeholder URLs
+        file_ext = format.lower()
+        s3_key = f"{self.prefix}{output_id}.{file_ext}"
+
+        # Convert PIL Image to bytes
+        buffer = BytesIO()
+        image.save(buffer, format=format, optimize=True)
+        buffer.seek(0)
+
+        # Determine content type
+        content_types = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}
+        content_type = content_types.get(file_ext, "image/png")
+
+        # Upload to S3
+        self.s3.put_object(
+            Bucket=self.bucket,
+            Key=s3_key,
+            Body=buffer.getvalue(),
+            ContentType=content_type,
+        )
+
+        # Build download URL
+        # CDN: use direct CDN URL (CDN handles public access)
+        # No CDN: route through our API (avoids S3 403 on private buckets)
+        if self.cdn_url:
+            download_url = f"{self.cdn_url}/{s3_key}"
+        else:
+            download_url = f"{self.base_url}/api/download/{output_id}"
+
         return StorageResult(
             output_id=output_id,
-            download_url=f"{self.base_cdn_url or 'https://cdn.example.com'}/{output_id}.png",
-            share_url=f"{self.share_base_url}/share/{output_id}",
-            expires_at=None,  # TODO: Implement expiration
+            download_url=download_url,
+            share_url=f"{self.base_url}/api/share/{output_id}",
         )
     
     async def get_image(self, output_id: str) -> Optional[bytes]:
-        """Retrieve image from cloud storage."""
-        # TODO: Implement cloud download
-        raise NotImplementedError("Cloud storage not yet implemented")
+        """Retrieve image from S3."""
+        for ext in ["png", "jpg", "jpeg", "webp"]:
+            s3_key = f"{self.prefix}{output_id}.{ext}"
+            try:
+                response = self.s3.get_object(Bucket=self.bucket, Key=s3_key)
+                return response["Body"].read()
+            except self.s3.exceptions.NoSuchKey:
+                continue
+            except Exception:
+                continue
+        return None
     
     async def delete_image(self, output_id: str) -> bool:
-        """Delete image from cloud storage."""
-        # TODO: Implement cloud deletion
-        raise NotImplementedError("Cloud storage not yet implemented")
+        """Delete image from S3."""
+        for ext in ["png", "jpg", "jpeg", "webp"]:
+            s3_key = f"{self.prefix}{output_id}.{ext}"
+            try:
+                # Check if object exists first
+                self.s3.head_object(Bucket=self.bucket, Key=s3_key)
+                self.s3.delete_object(Bucket=self.bucket, Key=s3_key)
+                return True
+            except Exception:
+                continue
+        return False
 
 
 class StorageService:
@@ -253,12 +315,9 @@ class StorageService:
         """
         # Generate unique ID with optional template prefix
         prefix = f"{template_id[:8]}-" if template_id else ""
-        output_id = f"{prefix}{uuid.uuid4().hex[:12]}"
+        output_id = f"{prefix}{uuid.uuid4().hex[:8]}"
         
         result = await self.provider.save_image(image, output_id)
-        
-        # TODO: Store metadata alongside image for retrieval
-        # This would include template_id, creation time, etc.
         
         return result
     
@@ -270,6 +329,48 @@ class StorageService:
         """Delete a saved output."""
         return await self.provider.delete_image(output_id)
 
+    def get_local_path(self, output_id: str) -> Optional[str]:
+        """Get local file path for an output (local provider only)."""
+        return self.provider.get_local_path(output_id)
 
-# Singleton instance (configured for local development)
-storage_service = StorageService()
+
+def _create_storage_service() -> StorageService:
+    """
+    Factory function that creates the StorageService based on config.
+    Called once at module load to create the singleton.
+    """
+    from config import settings
+
+    # Compute absolute output dir relative to project root
+    # storage_service.py is at backend/services/, so project root is 3 levels up
+    _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+    _PROJECT_ROOT = os.path.dirname(os.path.dirname(_THIS_DIR))
+    output_dir = os.path.join(_PROJECT_ROOT, settings.OUTPUTS_DIR)
+
+    if settings.STORAGE_PROVIDER == "s3":
+        if not settings.AWS_S3_BUCKET_NAME:
+            print("WARNING: STORAGE_PROVIDER=s3 but AWS_S3_BUCKET_NAME not set. Falling back to local.", flush=True)
+            provider = LocalStorageProvider(
+                output_dir=output_dir,
+                base_url=settings.BASE_URL,
+            )
+        else:
+            provider = S3StorageProvider(
+                bucket=settings.AWS_S3_BUCKET_NAME,
+                region=settings.AWS_REGION,
+                access_key_id=settings.AWS_ACCESS_KEY_ID,
+                secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                cdn_url=settings.AWS_S3_CDN_URL,
+                base_url=settings.BASE_URL,
+            )
+    else:
+        provider = LocalStorageProvider(
+            output_dir=output_dir,
+            base_url=settings.BASE_URL,
+        )
+
+    return StorageService(provider=provider)
+
+
+# Singleton instance (auto-configured from .env / config)
+storage_service = _create_storage_service()
