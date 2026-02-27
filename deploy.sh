@@ -35,16 +35,28 @@ else
     echo "Docker Compose already installed."
 fi
 
-# --- 4. Open Firewall Ports (iptables for Oracle Cloud) ---
+# --- 4. Open Firewall Ports ---
 echo "[4/5] Configuring firewall..."
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 80 -j ACCEPT
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 443 -j ACCEPT
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 8000 -j ACCEPT
-if command -v netfilter-persistent &> /dev/null; then
-    sudo netfilter-persistent save
+if command -v ufw &> /dev/null; then
+    # Standard Ubuntu firewall (InterServer, DigitalOcean, Hetzner, etc.)
+    sudo ufw allow 22/tcp    # SSH — always allow first!
+    sudo ufw allow 80/tcp    # HTTP
+    sudo ufw allow 443/tcp   # HTTPS
+    sudo ufw allow 8000/tcp  # Backend (direct access, optional)
+    sudo ufw --force enable
+    echo "UFW firewall configured."
 else
-    sudo apt-get install -y iptables-persistent
-    sudo netfilter-persistent save
+    # Fallback: iptables (Oracle Cloud, legacy setups)
+    sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 80 -j ACCEPT
+    sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 443 -j ACCEPT
+    sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 8000 -j ACCEPT
+    if command -v netfilter-persistent &> /dev/null; then
+        sudo netfilter-persistent save
+    else
+        sudo apt-get install -y iptables-persistent
+        sudo netfilter-persistent save
+    fi
+    echo "iptables firewall configured."
 fi
 
 # --- 5. Create .env if not exists ---

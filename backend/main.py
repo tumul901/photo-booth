@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.generate import router as generate_router
 from api.admin import router as admin_router
+from config import settings
 
 app = FastAPI(
     title="Photobooth SaaS API",
@@ -15,10 +16,16 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# CORS configuration for frontend access
+# CORS — allow frontend origin (and localhost for dev)
+allow_origins = [
+    settings.FRONTEND_URL,
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -42,10 +49,26 @@ async def root():
 @app.get("/health")
 async def health():
     """Detailed health check for deployment monitoring."""
+    # Check rembg
+    try:
+        from services.rembg_service import rembg_service
+        rembg_status = "ok" if rembg_service is not None else "unavailable"
+    except Exception as e:
+        rembg_status = f"error: {str(e)}"
+
+    # Check storage
+    try:
+        from services.storage_service import storage_service
+        provider_type = type(storage_service.provider).__name__
+        storage_status = f"ok ({provider_type})"
+    except Exception as e:
+        storage_status = f"error: {str(e)}"
+
     return {
         "status": "healthy",
+        "storage_provider": settings.STORAGE_PROVIDER,
         "services": {
-            "rembg": "stub",  # TODO: Add actual model load check
-            "storage": "stub",  # TODO: Add storage connectivity check
+            "rembg": rembg_status,
+            "storage": storage_status,
         },
     }

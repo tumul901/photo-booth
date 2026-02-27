@@ -9,7 +9,7 @@ services:
       - ./outputs:/outputs
       - ./backend/data:/app/data
     ports:
-      - "8000:8000"
+      - "8001:8000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -20,23 +20,10 @@ services:
     build:
       context: ./frontend
       args:
-        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-https://thecloudplay.com}
     container_name: photobooth-web
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3001:3000"
     depends_on:
       - backend
-
-  nginx:
-    image: nginx:alpine
-    container_name: photobooth-nginx
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-    depends_on:
-      - backend
-      - frontend
