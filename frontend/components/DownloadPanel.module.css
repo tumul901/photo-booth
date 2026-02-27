@@ -1,0 +1,166 @@
+/* DownloadPanel - Mobile-first Compact Layout */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-glass);
+}
+
+/* Action Button Grid - Compact on mobile */
+.actionGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-xs);
+  width: 100%;
+}
+
+.actionButton {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px 8px;
+  background: rgba(30, 30, 45, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all var(--transition-base);
+  touch-action: manipulation;
+  min-width: 0;
+}
+
+.actionButton:hover,
+.actionButton:active {
+  background: rgba(40, 40, 60, 0.8);
+  border-color: rgba(255, 255, 255, 0.1);
+  transform: translateY(-2px);
+}
+
+.actionButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.actionButton.copied {
+  background: rgba(16, 185, 129, 0.2);
+  border-color: var(--color-success);
+}
+
+.actionIcon {
+  font-size: 2rem;
+  line-height: 1;
+  filter: drop-shadow(0 4px 6px rgba(0,0,0,0.3));
+}
+
+.actionLabel {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.actionButton:hover .actionLabel,
+.actionButton:active .actionLabel {
+  color: var(--color-text-primary);
+}
+
+/* QR Section - Compact on mobile */
+.qrSection {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-xs);
+  padding-top: var(--space-xs);
+  border-top: 1px solid var(--glass-border);
+}
+
+.qrLabel {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  text-align: center;
+  margin: 0;
+}
+
+.qrContainer {
+  padding: var(--space-xs);
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--glass-border);
+}
+
+.qrContainer svg {
+  display: block;
+  width: 100px;
+  height: 100px;
+}
+
+/* Tablet+ adjustments */
+@media (min-width: 768px) {
+  .container {
+    padding: var(--space-md);
+    gap: var(--space-md);
+  }
+
+  .actionGrid {
+    gap: var(--space-sm);
+  }
+
+  .actionButton {
+    padding: 24px 12px;
+    gap: 0.5rem;
+  }
+
+  .actionIcon {
+    font-size: 2.5rem;
+  }
+
+  .actionLabel {
+    font-size: 0.85rem;
+  }
+
+  .qrLabel {
+    font-size: 0.875rem;
+  }
+
+  .qrContainer svg {
+    width: 130px;
+    height: 130px;
+  }
+}
+
+/* Toast Notification */
+.toast {
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.75rem 1.5rem;
+  background: rgba(76, 175, 80, 0.95);
+  color: #fff;
+  font-weight: 500;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  z-index: 200;
+  animation: slideInUp 0.3s ease-out;
+  pointer-events: none;
+}
+
+@keyframes slideInUp {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 20px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}

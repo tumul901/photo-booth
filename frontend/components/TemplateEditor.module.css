@@ -1,0 +1,336 @@
+/*
+ * TemplateEditor Styles
+ * =====================
+ */
+
+.editorContainer {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #0f0f1a;
+  color: #e0e0e0;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin: 0;
+  color: #fff;
+}
+
+.headerActions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.cancelButton {
+  padding: 0.5rem 1rem;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  color: #ccc;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.cancelButton:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.saveButton {
+  padding: 0.5rem 1.25rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.saveButton:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+/* Editor body layout */
+.editorBody {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Toolbar */
+.toolbar {
+  position: absolute;
+  top: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  gap: 1.5rem;
+  padding: 0.75rem 1.25rem;
+  background: rgba(20, 20, 35, 0.95);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.toolGroup {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.toolLabel {
+  font-size: 0.75rem;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.toolButton {
+  padding: 0.5rem 0.75rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: #ccc;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.toolButton:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.toolButton.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-color: transparent;
+  color: white;
+}
+
+.toolButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.dangerButton {
+  padding: 0.5rem 0.75rem;
+  background: rgba(255, 107, 107, 0.1);
+  border: 1px solid rgba(255, 107, 107, 0.3);
+  border-radius: 6px;
+  color: #ff6b6b;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.dangerButton:hover:not(:disabled) {
+  background: rgba(255, 107, 107, 0.2);
+}
+
+.dangerButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Canvas container */
+.canvasContainer {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  background: #0a0a14;
+  background-image: 
+    linear-gradient(45deg, #111 25%, transparent 25%),
+    linear-gradient(-45deg, #111 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #111 75%),
+    linear-gradient(-45deg, transparent 75%, #111 75%);
+  background-size: 20px 20px;
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+  overflow: auto;
+  padding: 2rem;
+}
+
+.loadingOverlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.7);
+  color: #888;
+  font-size: 1rem;
+}
+
+.canvas {
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.instructions {
+  position: absolute;
+  bottom: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.5rem 1rem;
+  background: rgba(0, 0, 0, 0.8);
+  border-radius: 20px;
+  font-size: 0.8rem;
+  color: #aaa;
+}
+
+/* Settings panel */
+.settingsPanel {
+  width: 320px;
+  background: #14141f;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 1.5rem;
+  overflow-y: auto;
+}
+
+.settingsTitle {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0 0 1rem 0;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.settingRow {
+  margin-bottom: 1.25rem;
+}
+
+.settingRow label {
+  display: block;
+  font-size: 0.8rem;
+  color: #aaa;
+  margin-bottom: 0.5rem;
+}
+
+.settingRow select,
+.settingRow input[type="number"] {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  color: #e0e0e0;
+  font-size: 0.85rem;
+}
+
+.settingRow select:focus,
+.settingRow input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.settingRow input[type="range"] {
+  width: 100%;
+  margin-top: 0.25rem;
+}
+
+.hint {
+  display: block;
+  font-size: 0.7rem;
+  color: #666;
+  margin-top: 0.25rem;
+}
+
+.rangeInputs {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.rangeInputs input {
+  width: 70px;
+}
+
+.rangeInputs span {
+  color: #666;
+  font-size: 0.8rem;
+}
+
+/* Slot list */
+.slotList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.slotItem {
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.slotItem:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.slotItem.selected {
+  background: rgba(102, 126, 234, 0.15);
+  border-color: #667eea;
+}
+
+.slotItem strong {
+  display: block;
+  font-size: 0.85rem;
+  color: #fff;
+  margin-bottom: 0.25rem;
+}
+
+.slotItem span {
+  display: block;
+  font-size: 0.75rem;
+  color: #888;
+}
+
+.emptySlots {
+  padding: 1rem;
+  text-align: center;
+  color: #666;
+  font-size: 0.85rem;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 6px;
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+  .editorBody {
+    flex-direction: column;
+  }
+  
+  .settingsPanel {
+    width: 100%;
+    max-height: 40vh;
+  }
+  
+  .toolbar {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+}

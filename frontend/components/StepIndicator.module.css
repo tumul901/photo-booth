@@ -1,0 +1,110 @@
+.container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 600px;
+  margin: 0 auto;
+  padding: var(--space-sm) var(--space-md);
+}
+
+.stepWrapper {
+  display: flex;
+  align-items: center;
+  flex: 1;
+}
+
+.stepWrapper:first-child {
+  flex: 0 0 auto;
+}
+
+.connector {
+  flex: 1;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 4px;
+  transition: background var(--transition-slow);
+  min-width: 30px;
+}
+
+.connectorActive {
+  background: linear-gradient(90deg, var(--color-accent-primary), var(--color-accent-secondary));
+}
+
+.step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+}
+
+.circle {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  background: rgba(255, 255, 255, 0.06);
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  color: var(--color-text-muted);
+  transition: all var(--transition-slow);
+}
+
+.label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+  transition: color var(--transition-slow);
+  white-space: nowrap;
+}
+
+/* Active step */
+.active .circle {
+  background: linear-gradient(135deg, var(--color-accent-primary), var(--color-accent-secondary));
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 0 20px rgba(102, 126, 234, 0.4);
+  transform: scale(1.1);
+}
+
+.active .label {
+  color: var(--color-text-primary);
+}
+
+/* Completed step */
+.completed .circle {
+  background: rgba(102, 234, 130, 0.15);
+  border-color: var(--color-success);
+  color: var(--color-success);
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.completed .label {
+  color: var(--color-success);
+}
+
+@media (max-width: 480px) {
+  .container {
+    padding: var(--space-xs) var(--space-sm);
+  }
+
+  .circle {
+    width: 36px;
+    height: 36px;
+    font-size: 0.9rem;
+  }
+
+  .label {
+    font-size: 0.6rem;
+  }
+
+  .connector {
+    min-width: 16px;
+  }
+}

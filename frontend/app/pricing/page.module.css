@@ -1,0 +1,287 @@
+.main {
+  min-height: 100vh;
+  padding: var(--space-xl) var(--space-md);
+  background: 
+    radial-gradient(circle at 10% 20%, rgba(102, 126, 234, 0.1) 0%, transparent 40%),
+    radial-gradient(circle at 90% 80%, rgba(118, 75, 162, 0.1) 0%, transparent 40%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Header Section */
+.header {
+  text-align: center;
+  margin-bottom: var(--space-xl);
+  max-width: 800px;
+}
+
+.title {
+  font-size: 3rem;
+  font-weight: 800;
+  margin-bottom: var(--space-md);
+  background: linear-gradient(135deg, #fff 0%, #a5b4fc 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  letter-spacing: -0.02em;
+}
+
+.subtitle {
+  font-size: 1.25rem;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+/* Toggle Controls */
+.controlsContainer {
+  display: flex;
+  gap: var(--space-xl);
+  margin-bottom: var(--space-xl);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* Toggle Switch */
+.toggleContainer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  background: var(--glass-bg);
+  padding: var(--space-xs) var(--space-md);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--glass-border);
+  cursor: pointer;
+  transition: border-color var(--transition-base);
+}
+
+.toggleContainer:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.toggleLabel {
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: color var(--transition-base);
+}
+
+.toggleLabel.active {
+  color: white;
+}
+
+.toggleSwitch {
+  width: 50px;
+  height: 28px;
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-full);
+  position: relative;
+  cursor: pointer;
+  transition: background var(--transition-base);
+}
+
+.toggleHandle {
+  width: 24px;
+  height: 24px;
+  background: white;
+  border-radius: 50%;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: transform var(--transition-base);
+  box-shadow: var(--shadow-sm);
+}
+
+.toggleSwitch.checked {
+  background: var(--color-accent-primary);
+}
+
+.toggleSwitch.checked .toggleHandle {
+  transform: translateX(22px);
+}
+
+/* Pricing Grid */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(1, 1fr);
+  gap: var(--space-lg);
+  width: 100%;
+  max-width: 1200px;
+  margin-bottom: var(--space-xl);
+}
+
+/* Desktop Grid */
+@media (min-width: 900px) {
+  .grid {
+    grid-template-columns: repeat(3, 1fr);
+    align-items: start;
+  }
+}
+
+/* Use flex for centering if needed, but grid works well */
+
+/* Pricing Card */
+.card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  position: relative;
+  transition: transform var(--transition-base), box-shadow var(--transition-base);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.card:hover {
+  transform: translateY(-5px);
+  box-shadow: var(--glass-shadow);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+/* Popular Card Styles */
+.cardPopular {
+  border-color: var(--color-accent-primary);
+  box-shadow: 0 0 20px rgba(102, 126, 234, 0.2);
+  transform: scale(1.05);
+  z-index: 2;
+}
+
+.cardPopular:hover {
+  transform: scale(1.05) translateY(-5px);
+  box-shadow: 0 0 30px rgba(102, 126, 234, 0.4);
+}
+
+.popularBadge {
+  position: absolute;
+  top: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, var(--color-accent-primary), var(--color-accent-secondary));
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: white;
+  box-shadow: var(--shadow-md);
+}
+
+.planName {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: var(--space-sm);
+  color: var(--color-text-primary);
+}
+
+.priceContainer {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin-bottom: var(--space-lg);
+}
+
+.currency {
+  font-size: 1.5rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.price {
+  font-size: 3rem;
+  font-weight: 700;
+  color: white;
+  line-height: 1;
+}
+
+.period {
+  color: var(--color-text-muted);
+  font-size: 1rem;
+}
+
+.featureList {
+  list-style: none;
+  margin-bottom: var(--space-xl);
+  flex-grow: 1;
+}
+
+.featureItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+  color: var(--color-text-secondary);
+}
+
+.checkIcon {
+  color: var(--color-success);
+  font-weight: bold;
+}
+
+/* CTA Button */
+.button {
+  width: 100%;
+  padding: var(--space-md);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--glass-border);
+  background: transparent;
+  color: white;
+  font-weight: 600;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+
+.button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.buttonPrimary {
+  background: linear-gradient(135deg, var(--color-accent-primary), var(--color-accent-secondary));
+  border: none;
+  box-shadow: var(--shadow-md);
+}
+
+.buttonPrimary:hover {
+  box-shadow: var(--shadow-glow);
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+/* FAQ Section */
+.faqSection {
+  max-width: 800px;
+  width: 100%;
+  margin-top: var(--space-xl);
+}
+
+.faqTitle {
+  text-align: center;
+  font-size: 2rem;
+  margin-bottom: var(--space-lg);
+}
+
+.faqGrid {
+  display: grid;
+  gap: var(--space-lg);
+}
+
+.faqItem {
+  background: var(--glass-bg);
+  padding: var(--space-md);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--glass-border);
+}
+
+.faqQuestion {
+  font-weight: 600;
+  margin-bottom: var(--space-xs);
+  color: white;
+}
+
+.faqAnswer {
+  color: var(--color-text-secondary);
+  font-size: 0.95rem;
+}

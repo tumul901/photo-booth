@@ -1,0 +1,109 @@
+.uploadContainer {
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-xl) var(--space-lg);
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
+  cursor: pointer;
+  transition: all var(--transition-base);
+  opacity: 1;
+  box-shadow: var(--shadow-md);
+}
+
+.dropzone:hover,
+.dropzone.dragging {
+  border-color: var(--color-accent-primary);
+  background: rgba(20, 20, 35, 0.85);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--color-accent-primary);
+}
+
+.uploadIcon {
+  font-size: 3.5rem;
+  margin-bottom: var(--space-sm);
+  opacity: 0.8;
+  transition: transform var(--transition-base);
+}
+
+.dropzone:hover .uploadIcon {
+  transform: scale(1.1);
+}
+
+.mainText {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.subText {
+  margin: var(--space-xs) 0 0 0;
+  font-size: 1rem;
+  color: var(--color-text-secondary);
+}
+
+.formatHint {
+  margin: var(--space-sm) 0 0 0;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+.hiddenInput {
+  display: none;
+}
+
+.previewContainer {
+  position: relative;
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  box-shadow: var(--glass-shadow);
+  animation: scaleIn 0.3s ease;
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.preview {
+  width: 100%;
+  display: block;
+}
+
+.clearButton {
+  position: absolute;
+  top: var(--space-sm);
+  right: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+
+.clearButton:hover {
+  background: rgba(0, 0, 0, 0.9);
+  transform: scale(1.05);
+}

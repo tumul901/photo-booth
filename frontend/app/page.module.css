@@ -1,0 +1,67 @@
+/* Wizard Layout */
+.main {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-primary);
+}
+
+/* Step Indicator Bar */
+.stepBar {
+  flex-shrink: 0;
+  padding: var(--space-sm) var(--space-md);
+  background: rgba(15, 15, 26, 0.9);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--glass-border);
+  z-index: 100;
+  animation: slideDown 0.3s ease;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Step Content — fills remaining viewport */
+.stepContent {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+}
+
+.stepContent > * {
+  width: 100%;
+  animation: fadeSlideIn 0.35s ease;
+}
+
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Error Banner */
+.error {
+  color: var(--color-error);
+  background: rgba(234, 102, 102, 0.1);
+  border-bottom: 1px solid rgba(234, 102, 102, 0.3);
+  padding: var(--space-xs) var(--space-md);
+  text-align: center;
+  font-size: 0.9rem;
+  flex-shrink: 0;
+  z-index: 99;
+  animation: fadeSlideIn 0.3s ease;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .stepBar {
+    padding: var(--space-xs) var(--space-sm);
+  }
+}

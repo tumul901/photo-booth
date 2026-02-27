@@ -1,0 +1,189 @@
+.webcamContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.videoWrapper {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #e0e0e0;
+  text-align: center;
+  padding: 2rem;
+}
+
+.cameraIcon {
+  font-size: 4rem;
+  margin-bottom: 1rem;
+  opacity: 0.7;
+}
+
+.placeholder p {
+  margin: 0.25rem 0;
+  font-size: 1.125rem;
+}
+
+.hint {
+  font-size: 0.875rem !important;
+  opacity: 0.6;
+}
+
+.video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.captureButton {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 2.5rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  border-radius: 50px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+}
+
+.captureButton:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+}
+
+.captureButton:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.captureButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+
+.captureIcon {
+  font-size: 1.5rem;
+}
+
+/* Countdown Overlay */
+.countdownOverlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.3);
+  z-index: 10;
+  backdrop-filter: blur(2px);
+}
+
+.countdownNumber {
+  font-size: 8rem;
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  animation: countdownPulse 0.9s ease-out infinite;
+}
+
+@keyframes countdownPulse {
+  0% {
+    transform: scale(0.5);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Aspect Ratio Selector */
+.aspectSelector {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.aspectButton {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: #aaa;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.aspectButton:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.aspectButton.aspectActive {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.3) 0%, rgba(118, 75, 162, 0.3) 100%);
+  border-color: #667eea;
+  color: #fff;
+}
+
+.aspectIcon {
+  font-size: 1.25rem;
+}
+
+.aspectLabel {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Crop Overlay */
+.cropOverlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.cropFrame {
+  border: 3px solid rgba(255, 255, 255, 0.8);
+  border-radius: 8px;
+  box-shadow: 
+    0 0 0 9999px rgba(0, 0, 0, 0.5),
+    inset 0 0 20px rgba(255, 255, 255, 0.1);
+  transition: all 0.3s ease;
+}
+
