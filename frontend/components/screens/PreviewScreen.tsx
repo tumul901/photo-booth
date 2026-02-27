@@ -27,7 +27,7 @@ export default function PreviewScreen({ result, isProcessing, error, onRetake, o
 
       <div className={styles.previewArea}>
         <ResultPreview
-          imageUrl={result?.downloadUrl}
+          imageUrl={result?.downloadUrl ?? null}
           isLoading={isProcessing}
           error={error}
           processingMode="frame"
