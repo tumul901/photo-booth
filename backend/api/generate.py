@@ -20,6 +20,7 @@ from services.compose import compose_service, load_template_metadata, TemplateMe
 from services.face_service import face_service
 from services.storage_service import storage_service
 from services.stats_service import stats_service
+from services.social_wall_service import social_wall_service
 
 router = APIRouter()
 
@@ -46,6 +47,7 @@ class GenerateResponse(BaseModel):
     output_id: Optional[str] = None
     error: Optional[str] = None
     processing_mode_used: Optional[str] = None
+    social_wall_sent: bool = False
 
 
 @router.post("/generate", response_model=GenerateResponse)
@@ -225,6 +227,10 @@ async def generate_composite(
         
         # Track stats
         stats_service.increment_generation(processing_mode, template_id)
+
+        # Send to Social Wall (fire-and-forget, never blocks)
+        social_wall_sent = bool(settings.SOCIAL_WALL_URL)
+        social_wall_service.fire_and_forget(result.download_url)
         
         return GenerateResponse(
             success=True,
@@ -233,6 +239,7 @@ async def generate_composite(
             download_url=result.download_url,
             error=None,
             processing_mode_used=processing_mode,
+            social_wall_sent=social_wall_sent,
         )
         
     except Exception as e:

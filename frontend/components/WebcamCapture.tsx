@@ -44,6 +44,11 @@ export default function WebcamCapture({
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('9:16'); // Default portrait
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+
+  const toggleCamera = useCallback(() => {
+    setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
+  }, []);
 
   // Parse aspect ratio to numeric value
   const getAspectRatioValue = (ratio: AspectRatio): number => {
@@ -51,7 +56,7 @@ export default function WebcamCapture({
     return w / h;
   };
 
-  // Initialize webcam on mount
+  // Initialize webcam on mount or when camera changes
   useEffect(() => {
     let mounted = true;
     
@@ -60,7 +65,7 @@ export default function WebcamCapture({
         // Request high resolution for better quality stickers
         const mediaStream = await navigator.mediaDevices.getUserMedia({ 
           video: { 
-            facingMode: 'user',
+            facingMode: facingMode,
             width: { ideal: 1920, min: 640 },
             height: { ideal: 1080, min: 480 },
           },
@@ -96,14 +101,12 @@ export default function WebcamCapture({
     
     initCamera();
     
-    // Cleanup on unmount
+    // Cleanup on unmount or facingMode change
     return () => {
       mounted = false;
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-      }
+      // Note: stream cleanup is handled by the other useEffect below
     };
-  }, [onError]);
+  }, [onError, facingMode]);
 
   // Stop stream when component unmounts
   useEffect(() => {
@@ -149,8 +152,9 @@ export default function WebcamCapture({
     
     console.log(`📸 Capturing at: ${canvas.width}×${canvas.height} (${aspectRatio})`);
     
-    // Apply mirror transformation if enabled
-    if (mirrored) {
+    // Apply mirror transformation if enabled (only for front camera)
+    const shouldMirror = mirrored && facingMode === 'user';
+    if (shouldMirror) {
       ctx.translate(canvas.width, 0);
       ctx.scale(-1, 1);
     }
@@ -165,7 +169,7 @@ export default function WebcamCapture({
     // Convert to base64 and return
     const imageData = canvas.toDataURL('image/png');
     onCapture(imageData);
-  }, [mirrored, onCapture, aspectRatio]);
+  }, [mirrored, onCapture, aspectRatio, facingMode]);
 
   const startCountdown = useCallback(() => {
     setCountdown(3);
@@ -217,6 +221,17 @@ export default function WebcamCapture({
       </div>
 
       <div className={styles.videoWrapper}>
+        {/* Flip Camera Button */}
+        {isReady && !error && (
+          <button 
+            className={styles.flipButton} 
+            onClick={toggleCamera}
+            title="Flip Camera"
+          >
+            🔄
+          </button>
+        )}
+
         {/* Show error if camera access failed */}
         {error && (
           <div className={styles.placeholder}>
@@ -259,7 +274,7 @@ export default function WebcamCapture({
           muted
           className={styles.video}
           style={{ 
-            transform: mirrored ? 'scaleX(-1)' : 'none',
+            transform: (mirrored && facingMode === 'user') ? 'scaleX(-1)' : 'none',
             display: isReady && !error ? 'block' : 'none',
           }}
         />

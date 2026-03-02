@@ -85,6 +85,7 @@ interface ResultData {
   outputId: string;
   downloadUrl: string;
   shareUrl: string;
+  socialWallSent?: boolean;
 }
 
 type ProcessingMode = 'frame' | 'sticker';
@@ -162,6 +163,7 @@ export default function BoothPage() {
         outputId: data.output_id,
         downloadUrl: data.download_url,
         shareUrl: data.output_url,
+        socialWallSent: data.social_wall_sent || false,
       };
 
       setResult(resultData);

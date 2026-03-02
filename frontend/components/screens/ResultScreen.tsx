@@ -16,6 +16,7 @@ interface ResultScreenProps {
     outputId: string;
     downloadUrl: string;
     shareUrl: string;
+    socialWallSent?: boolean;
   };
   onStartOver: () => void;
 }
@@ -59,6 +60,12 @@ export default function ResultScreen({ result, onStartOver }: ResultScreenProps)
           </div>
 
           <div className={styles.footer}>
+            {result.socialWallSent && (
+              <div className={styles.socialWallBadge}>
+                📺 Sent to Social Wall<br/>
+                <small>waiting for moderator&apos;s approval</small>
+              </div>
+            )}
             <button className={styles.startOverButton} onClick={onStartOver}>
               ↻ Start Over ({timeLeft}s)
             </button>
