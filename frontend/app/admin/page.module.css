@@ -259,3 +259,121 @@
   color: #667eea;
 }
 
+/* Gallery Styles */
+.galleryHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.galleryHeader .sectionTitle {
+  margin-bottom: 0;
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.refreshButton {
+  padding: 0.4rem 1rem;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  color: #a5b4fc;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: all 0.2s;
+}
+
+.refreshButton:hover {
+  background: rgba(102, 126, 234, 0.2);
+  color: #fff;
+}
+
+.gallerySubtitle {
+  color: #888;
+  font-size: 0.85rem;
+  margin: 0.5rem 0 1.5rem;
+}
+
+.galleryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+.galleryCard {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  overflow: hidden;
+  transition: transform 0.2s, border-color 0.2s;
+}
+
+.galleryCard:hover {
+  transform: translateY(-2px);
+  border-color: rgba(102, 126, 234, 0.4);
+}
+
+.galleryImageWrapper {
+  position: relative;
+  aspect-ratio: 1;
+  background: #1a1a2e;
+  overflow: hidden;
+}
+
+.galleryImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.galleryDeleteOverlay {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.85);
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.galleryCard:hover .galleryDeleteOverlay {
+  opacity: 1;
+}
+
+.galleryDeleteOverlay:hover {
+  background: rgba(239, 68, 68, 1);
+}
+
+.galleryCardInfo {
+  padding: 0.6rem 0.8rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.galleryFilename {
+  font-size: 0.7rem;
+  color: #aaa;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100px;
+}
+
+.gallerySize {
+  font-size: 0.7rem;
+  color: #667eea;
+  font-weight: 500;
+  white-space: nowrap;
+}
+

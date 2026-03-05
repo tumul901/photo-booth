@@ -15,6 +15,7 @@ from PIL import Image
 from io import BytesIO
 import uuid
 import os
+import time
 from datetime import datetime
 
 
@@ -112,15 +113,28 @@ class LocalStorageProvider(StorageProvider):
         self,
         image: Image.Image,
         filename: Optional[str] = None,
-        format: str = "PNG",
+        format: str = "JPEG",
+        quality: int = 90,
     ) -> StorageResult:
         """Save image to local filesystem."""
         output_id = filename or f"{uuid.uuid4().hex}"
-        file_ext = format.lower()
+        file_ext = "jpg" if format.upper() == "JPEG" else format.lower()
         filepath = os.path.join(self.output_dir, f"{output_id}.{file_ext}")
         
+        # Convert RGBA to RGB for JPEG (no transparency support)
+        save_image = image
+        if format.upper() == "JPEG" and image.mode == "RGBA":
+            bg = Image.new("RGB", image.size, (255, 255, 255))
+            bg.paste(image, mask=image.split()[3])
+            save_image = bg
+        
         # Save the image to disk
-        image.save(filepath, format=format, optimize=True)
+        t = time.perf_counter()
+        if format.upper() == "JPEG":
+            save_image.save(filepath, format="JPEG", quality=quality, optimize=True)
+        else:
+            save_image.save(filepath, format=format, optimize=True)
+        print(f"PERF:     encode:  {time.perf_counter() - t:.2f}s ({file_ext}, {os.path.getsize(filepath) / 1024:.0f}KB)", flush=True)
         
         return StorageResult(
             output_id=output_id,
@@ -206,33 +220,47 @@ class S3StorageProvider(StorageProvider):
         self,
         image: Image.Image,
         filename: Optional[str] = None,
-        format: str = "PNG",
+        format: str = "JPEG",
+        quality: int = 90,
     ) -> StorageResult:
         """Save image to S3."""
         output_id = filename or f"{uuid.uuid4().hex}"
-        file_ext = format.lower()
+        file_ext = "jpg" if format.upper() == "JPEG" else format.lower()
         s3_key = f"{self.prefix}{output_id}.{file_ext}"
 
-        # Convert PIL Image to bytes
+        # Convert RGBA to RGB for JPEG (no transparency support)
+        save_image = image
+        if format.upper() == "JPEG" and image.mode == "RGBA":
+            bg = Image.new("RGB", image.size, (255, 255, 255))
+            bg.paste(image, mask=image.split()[3])
+            save_image = bg
+
+        # Encode image to bytes
+        t = time.perf_counter()
         buffer = BytesIO()
-        image.save(buffer, format=format, optimize=True)
+        if format.upper() == "JPEG":
+            save_image.save(buffer, format="JPEG", quality=quality, optimize=True)
+        else:
+            save_image.save(buffer, format=format, optimize=True)
         buffer.seek(0)
+        file_size = len(buffer.getvalue())
+        print(f"PERF:     encode:  {time.perf_counter() - t:.2f}s ({file_ext}, {file_size / 1024:.0f}KB)", flush=True)
 
         # Determine content type
         content_types = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}
-        content_type = content_types.get(file_ext, "image/png")
+        content_type = content_types.get(file_ext, "image/jpeg")
 
         # Upload to S3
+        t = time.perf_counter()
         self.s3.put_object(
             Bucket=self.bucket,
             Key=s3_key,
             Body=buffer.getvalue(),
             ContentType=content_type,
         )
+        print(f"PERF:     upload:  {time.perf_counter() - t:.2f}s", flush=True)
 
         # Build download URL
-        # CDN: use direct CDN URL (CDN handles public access)
-        # No CDN: route through our API (avoids S3 403 on private buckets)
         if self.cdn_url:
             download_url = f"{self.cdn_url}/{s3_key}"
         else:

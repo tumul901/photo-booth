@@ -13,6 +13,7 @@ from io import BytesIO
 import os
 import uuid
 import json
+import time
 
 from config import settings
 from services.rembg_service import rembg_service
@@ -20,7 +21,6 @@ from services.compose import compose_service, load_template_metadata, TemplateMe
 from services.face_service import face_service
 from services.storage_service import storage_service
 from services.stats_service import stats_service
-from services.social_wall_service import social_wall_service
 
 router = APIRouter()
 
@@ -47,7 +47,6 @@ class GenerateResponse(BaseModel):
     output_id: Optional[str] = None
     error: Optional[str] = None
     processing_mode_used: Optional[str] = None
-    social_wall_sent: bool = False
 
 
 @router.post("/generate", response_model=GenerateResponse)
@@ -73,7 +72,9 @@ async def generate_composite(
        - Detect Face Landmarks (on Cropped Sticker)
     3. Composite (using aligned landmarks)
     """
-    print(f"DEBUG: Processing mode received: {processing_mode}", flush=True)
+    print(f"\n{'='*50}", flush=True)
+    print(f"PERF: Generate request — mode={processing_mode}, template={template_id}", flush=True)
+    t_total = time.perf_counter()
     
     try:
         # Validate inputs
@@ -120,7 +121,9 @@ async def generate_composite(
             
             if processing_mode == "sticker":
                 # 1. Remove background
+                t_step = time.perf_counter()
                 sticker_image = await rembg_service.remove_background(photo_bytes)
+                print(f"PERF:   rembg:     {time.perf_counter() - t_step:.2f}s", flush=True)
                 
                 # 2. Crop logic (Robust Tight Crop)
                 # We crop strictly to alpha bbox to remove empty space
@@ -128,6 +131,7 @@ async def generate_composite(
                 
                 # 3. Face Detection
                 # Must be run on the cropped sticker to get correct relative coordinates
+                t_step = time.perf_counter()
                 try:
                     landmarks = face_service.detect_landmarks(sticker_image)
                     if landmarks:
@@ -136,6 +140,7 @@ async def generate_composite(
                         print("DEBUG: No face detected in sticker", flush=True)
                 except Exception as e:
                     print(f"DEBUG: Face detection failed: {e}", flush=True)
+                print(f"PERF:   face:      {time.perf_counter() - t_step:.2f}s", flush=True)
 
             else:
                 # Frame mode: simple load
@@ -169,6 +174,7 @@ async def generate_composite(
                 pass
         
         # Compose final image
+        t_step = time.perf_counter()
         template_path = os.path.join(TEMPLATES_DIR, template_meta.png_path) if template_meta.png_path else None
         
         if processing_mode == "frame" and template_path and os.path.exists(template_path):
@@ -221,16 +227,18 @@ async def generate_composite(
                 processing_mode=processing_mode,
                 user_position=user_position,
             )
+        print(f"PERF:   compose:   {time.perf_counter() - t_step:.2f}s", flush=True)
         
         # Save via StorageService (handles local or S3 automatically)
+        t_step = time.perf_counter()
         result = await storage_service.save_output(final_image, template_id=template_id)
+        print(f"PERF:   save+s3:   {time.perf_counter() - t_step:.2f}s", flush=True)
         
         # Track stats
         stats_service.increment_generation(processing_mode, template_id)
 
-        # Send to Social Wall (fire-and-forget, never blocks)
-        social_wall_sent = bool(settings.SOCIAL_WALL_URL)
-        social_wall_service.fire_and_forget(result.download_url)
+        print(f"PERF:   TOTAL:     {time.perf_counter() - t_total:.2f}s", flush=True)
+        print(f"{'='*50}\n", flush=True)
         
         return GenerateResponse(
             success=True,
@@ -239,7 +247,6 @@ async def generate_composite(
             download_url=result.download_url,
             error=None,
             processing_mode_used=processing_mode,
-            social_wall_sent=social_wall_sent,
         )
         
     except Exception as e:
@@ -257,10 +264,14 @@ async def download_output(output_id: str):
     # For local storage: serve file directly
     local_path = storage_service.get_local_path(output_id)
     if local_path:
+        # Detect format from file extension
+        ext = os.path.splitext(local_path)[1].lstrip(".")
+        media_types = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}
+        media_type = media_types.get(ext, "image/jpeg")
         return FileResponse(
             local_path,
-            media_type="image/png",
-            filename=f"photobooth-{output_id}.png",
+            media_type=media_type,
+            filename=f"photobooth-{output_id}.{ext}",
         )
     
     # For cloud storage: check if image exists and return bytes
@@ -271,8 +282,8 @@ async def download_output(output_id: str):
     # Return the image bytes directly as a response
     return Response(
         content=image_bytes,
-        media_type="image/png",
-        headers={"Content-Disposition": f'attachment; filename="photobooth-{output_id}.png"'},
+        media_type="image/jpeg",
+        headers={"Content-Disposition": f'attachment; filename="photobooth-{output_id}.jpg"'},
     )
 
 

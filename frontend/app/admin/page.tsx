@@ -19,6 +19,14 @@ interface Template {
   png_path: string;
 }
 
+interface GalleryItem {
+  output_id: string;
+  filename: string;
+  url: string;
+  size: number;
+  last_modified: string;
+}
+
 interface TemplateConfig {
   templateId: string;
   name: string;
@@ -44,9 +52,10 @@ interface TemplateConfig {
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export default function AdminPage() {
-  const [activeTab, setActiveTab] = useState<'stats' | 'templates'>('stats');
+  const [activeTab, setActiveTab] = useState<'stats' | 'templates' | 'gallery'>('stats');
   const [stats, setStats] = useState<Stats | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
+  const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
@@ -72,11 +81,16 @@ export default function AdminPage() {
         if (!res.ok) throw new Error('Failed to fetch stats');
         const data = await res.json();
         setStats(data);
-      } else {
+      } else if (activeTab === 'templates') {
         const res = await fetch(`${API_BASE_URL}/api/admin/templates`);
         if (!res.ok) throw new Error('Failed to fetch templates');
         const data = await res.json();
         setTemplates(data);
+      } else if (activeTab === 'gallery') {
+        const res = await fetch(`${API_BASE_URL}/api/admin/gallery`);
+        if (!res.ok) throw new Error('Failed to fetch gallery');
+        const data = await res.json();
+        setGalleryItems(data);
       }
     } catch (err: any) {
       setError(err.message);
@@ -148,6 +162,19 @@ export default function AdminPage() {
     }
   };
 
+  const handleDeleteGalleryImage = async (outputId: string) => {
+    if (!confirm('Delete this photo from storage?')) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/gallery/${outputId}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error('Delete failed');
+      setGalleryItems((prev) => prev.filter((item) => item.output_id !== outputId));
+    } catch (err: any) {
+      alert(`Error: ${err.message}`);
+    }
+  };
+
   const handleConfigure = (template: Template) => {
     setEditingTemplate(template);
   };
@@ -206,6 +233,12 @@ export default function AdminPage() {
             onClick={() => setActiveTab('templates')}
           >
             🖼️ Templates
+          </button>
+          <button 
+            className={`${styles.navButton} ${activeTab === 'gallery' ? styles.active : ''}`}
+            onClick={() => setActiveTab('gallery')}
+          >
+            📸 Gallery
           </button>
         </nav>
       </header>
@@ -317,6 +350,46 @@ export default function AdminPage() {
             </div>
             {templates.length === 0 && (
               <p style={{textAlign:'center', color:'#666', marginTop:'2rem'}}>No templates found. Upload one to get started!</p>
+            )}
+          </div>
+        )}
+
+        {/* Gallery Tab */}
+        {!loading && !error && activeTab === 'gallery' && (
+          <div>
+            <div className={styles.galleryHeader}>
+              <h2 className={styles.sectionTitle}>Output Gallery</h2>
+              <button className={styles.refreshButton} onClick={fetchData}>🔄 Refresh</button>
+            </div>
+            <p className={styles.gallerySubtitle}>{galleryItems.length} photo{galleryItems.length !== 1 ? 's' : ''} in storage</p>
+            
+            <div className={styles.galleryGrid}>
+              {galleryItems.map((item) => (
+                <div key={item.output_id} className={styles.galleryCard}>
+                  <div className={styles.galleryImageWrapper}>
+                    <img 
+                      src={item.url} 
+                      alt={item.filename}
+                      className={styles.galleryImage}
+                      loading="lazy"
+                    />
+                    <button 
+                      className={styles.galleryDeleteOverlay}
+                      onClick={() => handleDeleteGalleryImage(item.output_id)}
+                      title="Delete photo"
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                  <div className={styles.galleryCardInfo}>
+                    <span className={styles.galleryFilename}>{item.filename}</span>
+                    <span className={styles.gallerySize}>{(item.size / 1024).toFixed(0)} KB</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {galleryItems.length === 0 && (
+              <p style={{textAlign:'center', color:'#666', marginTop:'2rem'}}>No photos yet. Generate some to see them here!</p>
             )}
           </div>
         )}

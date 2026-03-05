@@ -4,10 +4,8 @@
  * ResultScreen Component (Step 4)
  * ================================
  * Final screen showing the processed image, QR code, download options.
- * Auto-resets after 60 seconds for next guest.
  */
 
-import { useState, useEffect } from 'react';
 import DownloadPanel from '../DownloadPanel';
 import styles from './ResultScreen.module.css';
 
@@ -16,27 +14,11 @@ interface ResultScreenProps {
     outputId: string;
     downloadUrl: string;
     shareUrl: string;
-    socialWallSent?: boolean;
   };
   onStartOver: () => void;
 }
 
 export default function ResultScreen({ result, onStartOver }: ResultScreenProps) {
-  const [timeLeft, setTimeLeft] = useState(60);
-
-  useEffect(() => {
-    if (timeLeft <= 0) {
-      onStartOver();
-    }
-  }, [timeLeft, onStartOver]);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setTimeLeft((prev) => prev - 1);
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
-
   return (
     <div className={styles.container}>
       <div className={styles.splitLayout}>
@@ -60,14 +42,8 @@ export default function ResultScreen({ result, onStartOver }: ResultScreenProps)
           </div>
 
           <div className={styles.footer}>
-            {result.socialWallSent && (
-              <div className={styles.socialWallBadge}>
-                📺 Sent to Social Wall<br/>
-                <small>waiting for moderator&apos;s approval</small>
-              </div>
-            )}
             <button className={styles.startOverButton} onClick={onStartOver}>
-              ↻ Start Over ({timeLeft}s)
+              ↻ Start Over
             </button>
           </div>
         </div>
@@ -75,3 +51,4 @@ export default function ResultScreen({ result, onStartOver }: ResultScreenProps)
     </div>
   );
 }
+

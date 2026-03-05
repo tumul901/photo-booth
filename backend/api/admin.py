@@ -1,10 +1,12 @@
-from fastapi import APIRouter, File, UploadFile, HTTPException, Form
+from fastapi import APIRouter, File, UploadFile, HTTPException, Form, Query
 from fastapi.responses import JSONResponse, FileResponse
 import shutil
 import os
 import json
 from typing import List, Optional
 from services.stats_service import stats_service
+from services.storage_service import storage_service
+from config import settings
 from pathlib import Path
 from pydantic import BaseModel
 
@@ -316,3 +318,82 @@ async def get_template_config(template_id: str):
     
     raise HTTPException(status_code=404, detail="Template not found")
 
+
+# --- Gallery: View & Delete S3 Output Images ---
+
+@router.get("/gallery")
+async def list_gallery(limit: int = Query(50, ge=1, le=200)):
+    """
+    List output images stored in S3.
+    Returns key, download URL, size, and last modified for each image.
+    """
+    provider = storage_service.provider
+
+    # Check if using S3
+    if not hasattr(provider, 's3'):
+        # Local storage fallback: list files from outputs dir
+        outputs_dir = getattr(provider, 'output_dir', 'outputs')
+        if not os.path.isdir(outputs_dir):
+            return []
+        items = []
+        for fname in sorted(os.listdir(outputs_dir), reverse=True):
+            fpath = os.path.join(outputs_dir, fname)
+            if not os.path.isfile(fpath):
+                continue
+            output_id = os.path.splitext(fname)[0]
+            stat = os.stat(fpath)
+            items.append({
+                "output_id": output_id,
+                "filename": fname,
+                "url": f"{provider.base_url}/api/download/{output_id}",
+                "size": stat.st_size,
+                "last_modified": stat.st_mtime,
+            })
+            if len(items) >= limit:
+                break
+        return items
+
+    # S3 storage: list objects
+    try:
+        response = provider.s3.list_objects_v2(
+            Bucket=provider.bucket,
+            Prefix=provider.prefix,
+            MaxKeys=limit,
+        )
+        items = []
+        for obj in response.get('Contents', []):
+            key = obj['Key']
+            # Extract output_id from key (strip prefix and extension)
+            filename = key.replace(provider.prefix, '', 1)
+            output_id = os.path.splitext(filename)[0]
+
+            # Build url
+            if provider.cdn_url:
+                url = f"{provider.cdn_url}/{key}"
+            else:
+                url = f"{provider.base_url}/api/download/{output_id}"
+
+            items.append({
+                "output_id": output_id,
+                "filename": filename,
+                "url": url,
+                "size": obj['Size'],
+                "last_modified": obj['LastModified'].isoformat(),
+            })
+        return items
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list gallery: {str(e)}")
+
+
+@router.delete("/gallery/{output_id}")
+async def delete_gallery_image(output_id: str):
+    """Delete an output image from storage (S3 or local)."""
+    try:
+        deleted = await storage_service.delete_output(output_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Image not found")
+        return {"success": True, "deleted": output_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")

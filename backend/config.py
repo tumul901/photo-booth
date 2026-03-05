@@ -34,9 +34,7 @@ class Settings(BaseSettings):
     # --- Paths ---
     OUTPUTS_DIR: str = "outputs"
 
-    # --- Social Wall Integration (optional) ---
-    SOCIAL_WALL_URL: Optional[str] = None  # e.g. "http://localhost:8001"
-    SOCIAL_WALL_EVENT_ID: Optional[str] = None  # UUID of the active event
+
 
     # --- Admin Credentials ---
     ADMIN_USERNAME: str = "admin"

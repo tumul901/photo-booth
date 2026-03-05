@@ -4,16 +4,27 @@ Photobooth SaaS Backend
 FastAPI application for photo processing, background removal, and template compositing.
 """
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.generate import router as generate_router
 from api.admin import router as admin_router
 from config import settings
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Pre-warm heavy models on startup so the first request isn't slow."""
+    from services.rembg_service import rembg_service
+    rembg_service.warm_up()
+    yield
+
+
 app = FastAPI(
     title="Photobooth SaaS API",
     description="Background removal and template compositing for event photobooths",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # CORS — allow frontend origin (and localhost for dev)
