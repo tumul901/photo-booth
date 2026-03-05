@@ -34,3 +34,6 @@ npm-debug.log*
 
 # rembg model cache
 .u2net/
+
+# Stats data
+backend/data/stats.json
