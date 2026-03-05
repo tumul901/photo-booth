@@ -145,17 +145,20 @@ export default function BoothPage() {
       formData.append('processing_mode', processingMode);
 
       // Send to backend
+      console.time('API Generate Request');
       const apiRes = await fetch(`${API_BASE_URL}/api/generate`, {
         method: 'POST',
         body: formData,
       });
 
       if (!apiRes.ok) {
+        console.timeEnd('API Generate Request');
         const errData = await apiRes.json().catch(() => ({}));
         throw new Error(errData.error || `Server error: ${apiRes.status}`);
       }
 
       const data = await apiRes.json();
+      console.timeEnd('API Generate Request');
       if (!data.success) throw new Error(data.error || 'Processing failed');
 
       const resultData: ResultData = {
