@@ -114,7 +114,7 @@ class LocalStorageProvider(StorageProvider):
         image: Image.Image,
         filename: Optional[str] = None,
         format: str = "JPEG",
-        quality: int = 90,
+        quality: int = 85,
     ) -> StorageResult:
         """Save image to local filesystem."""
         output_id = filename or f"{uuid.uuid4().hex}"
@@ -131,9 +131,9 @@ class LocalStorageProvider(StorageProvider):
         # Save the image to disk
         t = time.perf_counter()
         if format.upper() == "JPEG":
-            save_image.save(filepath, format="JPEG", quality=quality, optimize=True)
+            save_image.save(filepath, format="JPEG", quality=quality)
         else:
-            save_image.save(filepath, format=format, optimize=True)
+            save_image.save(filepath, format=format)
         print(f"PERF:     encode:  {time.perf_counter() - t:.2f}s ({file_ext}, {os.path.getsize(filepath) / 1024:.0f}KB)", flush=True)
         
         return StorageResult(
@@ -221,7 +221,7 @@ class S3StorageProvider(StorageProvider):
         image: Image.Image,
         filename: Optional[str] = None,
         format: str = "JPEG",
-        quality: int = 90,
+        quality: int = 85,
     ) -> StorageResult:
         """Save image to S3."""
         output_id = filename or f"{uuid.uuid4().hex}"
@@ -239,9 +239,9 @@ class S3StorageProvider(StorageProvider):
         t = time.perf_counter()
         buffer = BytesIO()
         if format.upper() == "JPEG":
-            save_image.save(buffer, format="JPEG", quality=quality, optimize=True)
+            save_image.save(buffer, format="JPEG", quality=quality)
         else:
-            save_image.save(buffer, format=format, optimize=True)
+            save_image.save(buffer, format=format)
         buffer.seek(0)
         file_size = len(buffer.getvalue())
         print(f"PERF:     encode:  {time.perf_counter() - t:.2f}s ({file_ext}, {file_size / 1024:.0f}KB)", flush=True)

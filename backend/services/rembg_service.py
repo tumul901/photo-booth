@@ -28,7 +28,7 @@ REMBG_MODEL = "silueta"
 # Max dimension (width or height) before feeding into rembg.
 # Larger images are proportionally downsized. This cuts rembg
 # inference time by 3-5× for typical phone camera photos.
-MAX_INPUT_DIMENSION = 1200
+MAX_INPUT_DIMENSION = 1000
 
 
 class BackgroundRemovalService:

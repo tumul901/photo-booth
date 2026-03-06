@@ -12,9 +12,17 @@ Pipeline:
 from PIL import Image, ImageOps
 from typing import Tuple, Optional, Dict, List, Union
 from dataclasses import dataclass
+from functools import lru_cache
 import json
 import os
 from services.face_service import FaceLandmarks
+
+
+@lru_cache(maxsize=8)
+def _load_template_image(path: str) -> Image.Image:
+    """Cache template PNGs in memory to avoid repeated disk I/O."""
+    print(f"INFO: Loading template image into cache: {os.path.basename(path)}", flush=True)
+    return Image.open(path).convert("RGBA")
 
 @dataclass
 class SlotMetadata:
@@ -159,7 +167,7 @@ class ComposeService:
             new_h = int(sticker_h * scale)
             
             print(f"DEBUG SmartFit: Face-based scaling. Ratio={slot.desired_face_ratio}, Scale={scale:.2f}, output={new_w}×{new_h}")
-            return sticker.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            return sticker.resize((new_w, new_h), Image.Resampling.BICUBIC)
 
         # Logic 2: Standard Fit (no face detected)
         slot_w, slot_h = slot.width, slot.height
@@ -184,7 +192,7 @@ class ComposeService:
         new_w = int(sticker_w * scale)
         new_h = int(sticker_h * scale)
         print(f"DEBUG SmartFit: Output={new_w}×{new_h}")
-        return sticker.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        return sticker.resize((new_w, new_h), Image.Resampling.BICUBIC)
 
     def calculate_placement(
         self,
@@ -270,9 +278,9 @@ class ComposeService:
         
         # For sticker "background" mode, place template first (behind sticker)
         if processing_mode == "sticker" and template_meta.composite_mode == "background" and template_path and os.path.exists(template_path):
-            template = Image.open(template_path).convert("RGBA")
+            template = _load_template_image(template_path).copy()
             if template.size != (template_meta.width, template_meta.height):
-                template = template.resize((template_meta.width, template_meta.height), Image.Resampling.LANCZOS)
+                template = template.resize((template_meta.width, template_meta.height), Image.Resampling.BICUBIC)
             canvas = Image.alpha_composite(canvas, template)
         
         # Sort slots
@@ -314,7 +322,7 @@ class ComposeService:
                 if user_scale != 1.0:
                     new_w = int(sticker_scaled.width * user_scale)
                     new_h = int(sticker_scaled.height * user_scale)
-                    sticker_scaled = sticker_scaled.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                    sticker_scaled = sticker_scaled.resize((new_w, new_h), Image.Resampling.BICUBIC)
                 
                 base_x = slot.x + (slot.width - sticker_scaled.width) // 2
                 base_y = slot.y + (slot.height - sticker_scaled.height) // 2
@@ -337,9 +345,9 @@ class ComposeService:
         # --- FRAME MODE: Always place frame ON TOP with holes at slot positions ---
         if processing_mode == "frame" and template_path and os.path.exists(template_path):
             print(f"DEBUG Compose: Frame mode — placing frame ON TOP with slot cutouts", flush=True)
-            template = Image.open(template_path).convert("RGBA")
+            template = _load_template_image(template_path).copy()
             if template.size != (template_meta.width, template_meta.height):
-                template = template.resize((template_meta.width, template_meta.height), Image.Resampling.LANCZOS)
+                template = template.resize((template_meta.width, template_meta.height), Image.Resampling.BICUBIC)
             
             # Punch transparent holes at slot positions so photo shows through
             mask = template.getchannel("A").copy()
@@ -354,9 +362,9 @@ class ComposeService:
         
         # --- STICKER MODE with overlay: Place template on top ---
         elif processing_mode == "sticker" and template_meta.composite_mode == "overlay" and template_path and os.path.exists(template_path):
-            template = Image.open(template_path).convert("RGBA")
+            template = _load_template_image(template_path).copy()
             if template.size != (template_meta.width, template_meta.height):
-                template = template.resize((template_meta.width, template_meta.height), Image.Resampling.LANCZOS)
+                template = template.resize((template_meta.width, template_meta.height), Image.Resampling.BICUBIC)
             canvas = Image.alpha_composite(canvas, template)
              
         return canvas
