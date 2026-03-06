@@ -229,15 +229,19 @@ async def generate_composite(
             )
         print(f"PERF:   compose:   {time.perf_counter() - t_step:.2f}s", flush=True)
         
-        # Save via StorageService (handles local or S3 automatically)
+        # Save via StorageService — encode immediately, defer S3 upload
         t_step = time.perf_counter()
-        result = await storage_service.save_output(final_image, template_id=template_id)
-        print(f"PERF:   save+s3:   {time.perf_counter() - t_step:.2f}s", flush=True)
+        import asyncio
+        result, upload_fn = await storage_service.save_output_deferred(final_image, template_id=template_id)
+        print(f"PERF:   encode:    {time.perf_counter() - t_step:.2f}s", flush=True)
+        
+        # Fire off S3 upload in background — user doesn't wait for it
+        asyncio.create_task(upload_fn())
         
         # Track stats
         stats_service.increment_generation(processing_mode, template_id)
 
-        print(f"PERF:   TOTAL:     {time.perf_counter() - t_total:.2f}s", flush=True)
+        print(f"PERF:   TOTAL:     {time.perf_counter() - t_total:.2f}s (upload runs in background)", flush=True)
         print(f"{'='*50}\n", flush=True)
         
         return GenerateResponse(
@@ -274,8 +278,15 @@ async def download_output(output_id: str):
             filename=f"photobooth-{output_id}.{ext}",
         )
     
-    # For cloud storage: check if image exists and return bytes
-    image_bytes = await storage_service.get_output(output_id)
+    # For cloud storage: retry a few times in case background upload is still in progress
+    import asyncio
+    image_bytes = None
+    for attempt in range(3):
+        image_bytes = await storage_service.get_output(output_id)
+        if image_bytes is not None:
+            break
+        await asyncio.sleep(1)  # Wait 1s for background upload to finish
+    
     if image_bytes is None:
         raise HTTPException(status_code=404, detail="Output not found")
     

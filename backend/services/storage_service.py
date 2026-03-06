@@ -223,7 +223,22 @@ class S3StorageProvider(StorageProvider):
         format: str = "JPEG",
         quality: int = 85,
     ) -> StorageResult:
-        """Save image to S3."""
+        """Save image to S3. Encodes immediately, uploads in foreground by default.
+        Use save_image_deferred() + upload_deferred() to defer the upload."""
+        result, upload_fn = await self.save_image_deferred(image, filename, format, quality)
+        await upload_fn()
+        return result
+
+    async def save_image_deferred(
+        self,
+        image: Image.Image,
+        filename: Optional[str] = None,
+        format: str = "JPEG",
+        quality: int = 85,
+    ):
+        """Encode image and return (StorageResult, upload_coroutine).
+        Call the returned coroutine to actually upload to S3.
+        This lets you return the result to the user BEFORE the upload finishes."""
         output_id = filename or f"{uuid.uuid4().hex}"
         file_ext = "jpg" if format.upper() == "JPEG" else format.lower()
         s3_key = f"{self.prefix}{output_id}.{file_ext}"
@@ -243,34 +258,38 @@ class S3StorageProvider(StorageProvider):
         else:
             save_image.save(buffer, format=format)
         buffer.seek(0)
-        file_size = len(buffer.getvalue())
+        encoded_bytes = buffer.getvalue()
+        file_size = len(encoded_bytes)
         print(f"PERF:     encode:  {time.perf_counter() - t:.2f}s ({file_ext}, {file_size / 1024:.0f}KB)", flush=True)
 
         # Determine content type
         content_types = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}
         content_type = content_types.get(file_ext, "image/jpeg")
 
-        # Upload to S3
-        t = time.perf_counter()
-        self.s3.put_object(
-            Bucket=self.bucket,
-            Key=s3_key,
-            Body=buffer.getvalue(),
-            ContentType=content_type,
-        )
-        print(f"PERF:     upload:  {time.perf_counter() - t:.2f}s", flush=True)
-
-        # Build download URL
+        # Build download URL (available immediately, before upload)
         if self.cdn_url:
             download_url = f"{self.cdn_url}/{s3_key}"
         else:
             download_url = f"{self.base_url}/api/download/{output_id}"
 
-        return StorageResult(
+        result = StorageResult(
             output_id=output_id,
             download_url=download_url,
             share_url=f"{self.base_url}/api/share/{output_id}",
         )
+
+        async def _do_upload():
+            """Actually upload to S3. Can be called in a background task."""
+            t_up = time.perf_counter()
+            self.s3.put_object(
+                Bucket=self.bucket,
+                Key=s3_key,
+                Body=encoded_bytes,
+                ContentType=content_type,
+            )
+            print(f"PERF:     upload:  {time.perf_counter() - t_up:.2f}s (background)", flush=True)
+
+        return result, _do_upload
     
     async def get_image(self, output_id: str) -> Optional[bytes]:
         """Retrieve image from S3."""
@@ -348,6 +367,25 @@ class StorageService:
         result = await self.provider.save_image(image, output_id)
         
         return result
+
+    async def save_output_deferred(
+        self,
+        image: Image.Image,
+        template_id: Optional[str] = None,
+    ):
+        """Save output but defer the actual upload. Returns (StorageResult, upload_coroutine).
+        Only works with S3StorageProvider; falls back to normal save for local."""
+        prefix = f"{template_id[:8]}-" if template_id else ""
+        output_id = f"{prefix}{uuid.uuid4().hex[:8]}"
+
+        if hasattr(self.provider, 'save_image_deferred'):
+            return await self.provider.save_image_deferred(image, output_id)
+        else:
+            # Local storage: just save normally, no background task needed
+            result = await self.provider.save_image(image, output_id)
+            async def _noop():
+                pass
+            return result, _noop
     
     async def get_output(self, output_id: str) -> Optional[bytes]:
         """Retrieve a previously saved output."""
