@@ -187,6 +187,7 @@ class S3StorageProvider(StorageProvider):
         secret_access_key: Optional[str] = None,
         cdn_url: Optional[str] = None,
         base_url: str = "http://localhost:8000",
+        local_output_dir: str = "outputs",
     ):
         """
         Initialize S3 storage provider.
@@ -198,6 +199,7 @@ class S3StorageProvider(StorageProvider):
             secret_access_key: AWS secret key (uses env/IAM role if None)
             cdn_url: Optional CloudFront CDN URL for downloads
             base_url: API base URL for share page links
+            local_output_dir: Local directory for fast serving before S3 upload completes
         """
         import boto3
 
@@ -206,6 +208,8 @@ class S3StorageProvider(StorageProvider):
         self.cdn_url = cdn_url
         self.base_url = base_url
         self.prefix = "outputs/"  # S3 key prefix
+        self.local_output_dir = local_output_dir
+        os.makedirs(local_output_dir, exist_ok=True)
 
         # Build boto3 client kwargs
         client_kwargs = {"region_name": region}
@@ -214,7 +218,7 @@ class S3StorageProvider(StorageProvider):
             client_kwargs["aws_secret_access_key"] = secret_access_key
 
         self.s3 = boto3.client("s3", **client_kwargs)
-        print(f"INFO: S3 storage initialized — bucket={bucket}, region={region}", flush=True)
+        print(f"INFO: S3 storage initialized — bucket={bucket}, region={region}, local_cache={local_output_dir}", flush=True)
     
     async def save_image(
         self,
@@ -236,12 +240,12 @@ class S3StorageProvider(StorageProvider):
         format: str = "JPEG",
         quality: int = 85,
     ):
-        """Encode image and return (StorageResult, upload_coroutine).
-        Call the returned coroutine to actually upload to S3.
-        This lets you return the result to the user BEFORE the upload finishes."""
+        """Save image to LOCAL DISK first (instant), then upload to S3 in background.
+        Returns (StorageResult, upload_coroutine)."""
         output_id = filename or f"{uuid.uuid4().hex}"
         file_ext = "jpg" if format.upper() == "JPEG" else format.lower()
         s3_key = f"{self.prefix}{output_id}.{file_ext}"
+        local_path = os.path.join(self.local_output_dir, f"{output_id}.{file_ext}")
 
         # Convert RGBA to RGB for JPEG (no transparency support)
         save_image = image
@@ -250,27 +254,21 @@ class S3StorageProvider(StorageProvider):
             bg.paste(image, mask=image.split()[3])
             save_image = bg
 
-        # Encode image to bytes
+        # Save to LOCAL DISK first — this is instant and serves the user immediately
         t = time.perf_counter()
-        buffer = BytesIO()
         if format.upper() == "JPEG":
-            save_image.save(buffer, format="JPEG", quality=quality)
+            save_image.save(local_path, format="JPEG", quality=quality)
         else:
-            save_image.save(buffer, format=format)
-        buffer.seek(0)
-        encoded_bytes = buffer.getvalue()
-        file_size = len(encoded_bytes)
-        print(f"PERF:     encode:  {time.perf_counter() - t:.2f}s ({file_ext}, {file_size / 1024:.0f}KB)", flush=True)
+            save_image.save(local_path, format=format)
+        file_size = os.path.getsize(local_path)
+        print(f"PERF:     local_save: {time.perf_counter() - t:.2f}s ({file_ext}, {file_size / 1024:.0f}KB)", flush=True)
 
-        # Determine content type
+        # Determine content type for S3
         content_types = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}
         content_type = content_types.get(file_ext, "image/jpeg")
 
-        # Build download URL (available immediately, before upload)
-        if self.cdn_url:
-            download_url = f"{self.cdn_url}/{s3_key}"
-        else:
-            download_url = f"{self.base_url}/api/download/{output_id}"
+        # Download URL always goes through our API (local file serves instantly)
+        download_url = f"{self.base_url}/api/download/{output_id}"
 
         result = StorageResult(
             output_id=output_id,
@@ -279,15 +277,16 @@ class S3StorageProvider(StorageProvider):
         )
 
         async def _do_upload():
-            """Actually upload to S3. Can be called in a background task."""
+            """Upload to S3 in background for persistence. Local file serves in the meantime."""
             t_up = time.perf_counter()
-            self.s3.put_object(
-                Bucket=self.bucket,
-                Key=s3_key,
-                Body=encoded_bytes,
-                ContentType=content_type,
-            )
-            print(f"PERF:     upload:  {time.perf_counter() - t_up:.2f}s (background)", flush=True)
+            with open(local_path, "rb") as f:
+                self.s3.put_object(
+                    Bucket=self.bucket,
+                    Key=s3_key,
+                    Body=f.read(),
+                    ContentType=content_type,
+                )
+            print(f"PERF:     s3_upload: {time.perf_counter() - t_up:.2f}s (background)", flush=True)
 
         return result, _do_upload
     
@@ -305,17 +304,30 @@ class S3StorageProvider(StorageProvider):
         return None
     
     async def delete_image(self, output_id: str) -> bool:
-        """Delete image from S3."""
+        """Delete image from S3 and local cache."""
+        # Delete local copy
+        for ext in ["png", "jpg", "jpeg", "webp"]:
+            local_path = os.path.join(self.local_output_dir, f"{output_id}.{ext}")
+            if os.path.exists(local_path):
+                os.remove(local_path)
+        # Delete from S3
         for ext in ["png", "jpg", "jpeg", "webp"]:
             s3_key = f"{self.prefix}{output_id}.{ext}"
             try:
-                # Check if object exists first
                 self.s3.head_object(Bucket=self.bucket, Key=s3_key)
                 self.s3.delete_object(Bucket=self.bucket, Key=s3_key)
                 return True
             except Exception:
                 continue
         return False
+
+    def get_local_path(self, output_id: str) -> Optional[str]:
+        """Check local cache first for fast serving."""
+        for ext in ["png", "jpg", "jpeg", "webp"]:
+            filepath = os.path.join(self.local_output_dir, f"{output_id}.{ext}")
+            if os.path.exists(filepath):
+                return filepath
+        return None
 
 
 class StorageService:
@@ -428,6 +440,7 @@ def _create_storage_service() -> StorageService:
                 secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
                 cdn_url=settings.AWS_S3_CDN_URL,
                 base_url=settings.BASE_URL,
+                local_output_dir=output_dir,
             )
     else:
         provider = LocalStorageProvider(

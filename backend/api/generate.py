@@ -264,11 +264,10 @@ async def generate_composite(
 
 @router.get("/download/{output_id}")
 async def download_output(output_id: str):
-    """Download a generated output image."""
-    # For local storage: serve file directly
+    """Download a generated output image. Serves from local disk (instant) or S3 fallback."""
+    # Local storage first: instant serve via FileResponse
     local_path = storage_service.get_local_path(output_id)
     if local_path:
-        # Detect format from file extension
         ext = os.path.splitext(local_path)[1].lstrip(".")
         media_types = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}
         media_type = media_types.get(ext, "image/jpeg")
@@ -278,19 +277,11 @@ async def download_output(output_id: str):
             filename=f"photobooth-{output_id}.{ext}",
         )
     
-    # For cloud storage: retry a few times in case background upload is still in progress
-    import asyncio
-    image_bytes = None
-    for attempt in range(3):
-        image_bytes = await storage_service.get_output(output_id)
-        if image_bytes is not None:
-            break
-        await asyncio.sleep(1)  # Wait 1s for background upload to finish
-    
+    # Fallback: fetch from S3 (for older images not in local cache)
+    image_bytes = await storage_service.get_output(output_id)
     if image_bytes is None:
         raise HTTPException(status_code=404, detail="Output not found")
     
-    # Return the image bytes directly as a response
     return Response(
         content=image_bytes,
         media_type="image/jpeg",
@@ -350,7 +341,7 @@ async def list_templates():
 
 @router.get("/templates/{template_id}/image")
 async def get_template_image(template_id: str):
-    """Serve the frame PNG for a template (used for editor preview)."""
+    """Serve a lightweight JPEG thumbnail for template preview (~30-50KB)."""
     meta = load_template_metadata(template_id, TEMPLATES_DIR)
     
     if not meta:
@@ -360,10 +351,28 @@ async def get_template_image(template_id: str):
     if not os.path.exists(png_path):
         raise HTTPException(status_code=404, detail="Template image not found")
     
+    # Check for cached thumbnail (stored in outputs dir since templates may be read-only)
+    thumb_dir = os.path.join(OUTPUTS_DIR, ".thumbnails")
+    os.makedirs(thumb_dir, exist_ok=True)
+    thumb_path = os.path.join(thumb_dir, f"{template_id}.jpg")
+    
+    if not os.path.exists(thumb_path):
+        # Generate thumbnail: 400px max dimension, JPEG quality 80
+        img = Image.open(png_path)
+        img.thumbnail((400, 400), Image.Resampling.BICUBIC)
+        # Convert RGBA to RGB for JPEG
+        if img.mode == "RGBA":
+            bg = Image.new("RGB", img.size, (255, 255, 255))
+            bg.paste(img, mask=img.split()[3])
+            img = bg
+        img.save(thumb_path, format="JPEG", quality=80)
+        print(f"INFO: Generated thumbnail for {template_id} ({os.path.getsize(thumb_path) / 1024:.0f}KB)", flush=True)
+    
     return FileResponse(
-        png_path,
-        media_type="image/png",
-        filename=f"{template_id}.png"
+        thumb_path,
+        media_type="image/jpeg",
+        filename=f"{template_id}_thumb.jpg",
+        headers={"Cache-Control": "public, max-age=86400"},  # Cache 24h
     )
 
 
