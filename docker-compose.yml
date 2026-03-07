@@ -5,7 +5,7 @@ services:
     restart: unless-stopped
     env_file: ./backend/.env
     volumes:
-      - ./templates:/templates:ro
+      - ./templates:/templates
       - ./outputs:/outputs
       - ./backend/data:/app/data
     ports:
