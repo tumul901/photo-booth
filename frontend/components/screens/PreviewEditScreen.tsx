@@ -34,7 +34,6 @@ export default function PreviewEditScreen({
   const [extractedSrc, setExtractedSrc] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Sticker Transform State
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const [scale, setScale] = useState(1);
   const isDragging = useRef(false);
@@ -93,26 +92,70 @@ export default function PreviewEditScreen({
     };
   }, [rawImage, anchorMode]);
 
+  // Gesture Tracking State
+  const pointers = useRef<Map<number, { x: number, y: number }>>(new Map());
+  const initialPinchDist = useRef<number | null>(null);
+  const initialScale = useRef<number>(1);
+
   // Drag handlers
   const handlePointerDown = (e: React.PointerEvent) => {
-    isDragging.current = true;
-    dragStart.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
     // @ts-ignore
     e.target.setPointerCapture(e.pointerId);
+    
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (pointers.current.size === 1) {
+      isDragging.current = true;
+      dragStart.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
+    } else if (pointers.current.size === 2) {
+      // Start of a pinch gesture
+      const pts = Array.from(pointers.current.values());
+      initialPinchDist.current = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+      initialScale.current = scale;
+    }
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (!isDragging.current) return;
-    setPos({
-      x: e.clientX - dragStart.current.x,
-      y: e.clientY - dragStart.current.y,
-    });
+    if (!pointers.current.has(e.pointerId)) return;
+    
+    // Update active pointer position
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (pointers.current.size === 1 && isDragging.current) {
+      // Single finger drag
+      setPos({
+        x: e.clientX - dragStart.current.x,
+        y: e.clientY - dragStart.current.y,
+      });
+    } else if (pointers.current.size === 2 && initialPinchDist.current !== null) {
+      // Two finger pinch
+      const pts = Array.from(pointers.current.values());
+      const currentDist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+      
+      if (initialPinchDist.current > 10) { // Avoid division by zero/tiny numbers
+        const zoomFactor = currentDist / initialPinchDist.current;
+        const newScale = Math.min(Math.max(initialScale.current * zoomFactor, 0.25), 4);
+        setScale(newScale);
+      }
+    }
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
-    isDragging.current = false;
     // @ts-ignore
     e.target.releasePointerCapture(e.pointerId);
+    pointers.current.delete(e.pointerId);
+
+    if (pointers.current.size < 2) {
+      initialPinchDist.current = null;
+    }
+    
+    if (pointers.current.size === 0) {
+      isDragging.current = false;
+    } else if (pointers.current.size === 1) {
+      // Resume dragging with the remaining pointer
+      const remaining = Array.from(pointers.current.values())[0];
+      dragStart.current = { x: remaining.x - pos.x, y: remaining.y - pos.y };
+    }
   };
 
   const handleDone = () => {
@@ -219,7 +262,7 @@ export default function PreviewEditScreen({
             />
             <span>Larger</span>
           </div>
-          <p className={styles.helpText}>Drag the photo to move • Use slider to resize</p>
+          <p className={styles.helpText}>Drag the photo to move • Use slider or pinch to resize</p>
         </div>
       )}
     </div>

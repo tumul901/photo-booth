@@ -19,11 +19,11 @@ import styles from './WebcamCapture.module.css';
 type AspectRatio = '9:16' | '16:9' | '1:1' | '4:5' | '3:4';
 
 const ASPECT_RATIOS: { id: AspectRatio; label: string; icon: string }[] = [
-  { id: '9:16', label: 'Portrait', icon: '📱' },
-  { id: '4:5', label: 'Instagram', icon: '📷' },
+  { id: '9:16', label: 'Phone Port.', icon: '📱' },
+  { id: '4:5', label: 'Instagram', icon: '📸' },
   { id: '1:1', label: 'Square', icon: '⬜' },
   { id: '3:4', label: 'Classic', icon: '🖼️' },
-  { id: '16:9', label: 'Landscape', icon: '🖥️' },
+  { id: '16:9', label: 'Phone Land.', icon: '🤳' },
 ];
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -79,21 +79,32 @@ export default function WebcamCapture({
       .catch(err => console.error("Failed to load template configuration:", err));
   }, [selectedTemplate]);
 
-  // Initialize webcam on mount or when camera changes
+  // Initialize webcam on mount, when camera changes, or when orientation changes
   useEffect(() => {
     let mounted = true;
     
     async function initCamera() {
       try {
-        // Request high resolution for better quality stickers
-        const mediaStream = await navigator.mediaDevices.getUserMedia({ 
+        // Determine orientation based on aspect ratio
+        const isPortrait = getAspectRatioValue(aspectRatio) < 1.0;
+        
+        // Request constraints that match the intended orientation
+        // This is crucial for phones: it tells the browser to use the full sensor height
+        const constraints: MediaStreamConstraints = { 
           video: { 
             facingMode: facingMode,
-            width: { ideal: 1920, min: 640 },
-            height: { ideal: 1080, min: 480 },
+            width: isPortrait ? { ideal: 1080, min: 480 } : { ideal: 1920, min: 640 },
+            height: isPortrait ? { ideal: 1920, min: 640 } : { ideal: 1080, min: 480 },
           },
           audio: false,
-        });
+        };
+
+        // Stop previous stream before switching to avoid device-in-use errors
+        if (stream) {
+          stream.getTracks().forEach(track => track.stop());
+        }
+
+        const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
         
         if (!mounted) {
           mediaStream.getTracks().forEach(track => track.stop());
@@ -124,12 +135,11 @@ export default function WebcamCapture({
     
     initCamera();
     
-    // Cleanup on unmount or facingMode change
+    // Cleanup on unmount or dependency change
     return () => {
       mounted = false;
-      // Note: stream cleanup is handled by the other useEffect below
     };
-  }, [onError, facingMode]);
+  }, [onError, facingMode, getAspectRatioValue(aspectRatio) < 1.0]); // Re-init only if orientation flips
 
   // Stop stream when component unmounts
   useEffect(() => {
