@@ -51,6 +51,9 @@ export default function WebcamCapture({
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   
   const [showGuide, setShowGuide] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [zoomRange, setZoomRange] = useState({ min: 1, max: 1 });
+  const [hasZoom, setHasZoom] = useState(false);
 
   const toggleCamera = useCallback(() => {
     setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
@@ -119,6 +122,17 @@ export default function WebcamCapture({
           setIsReady(true);
           setError(null);
           
+          // Check for zoom capabilities
+          const track = mediaStream.getVideoTracks()[0];
+          const capabilities = track.getCapabilities() as any;
+          if (capabilities.zoom) {
+            setHasZoom(true);
+            setZoomRange({ min: capabilities.zoom.min, max: capabilities.zoom.max });
+            setZoom(capabilities.zoom.min);
+          } else {
+            setHasZoom(false);
+          }
+
           // Log actual resolution for debugging
           videoRef.current.onloadedmetadata = () => {
             console.log(`📷 Webcam resolution: ${videoRef.current?.videoWidth}×${videoRef.current?.videoHeight}`);
@@ -142,6 +156,15 @@ export default function WebcamCapture({
       mounted = false;
     };
   }, [onError, facingMode, getAspectRatioValue(aspectRatio) < 1.0]); // Re-init only if orientation flips
+
+  // Apply zoom changes
+  useEffect(() => {
+    if (!stream || !hasZoom) return;
+    const track = stream.getVideoTracks()[0];
+    track.applyConstraints({
+      advanced: [{ zoom: zoom } as any]
+    }).catch(err => console.error("Failed to apply zoom:", err));
+  }, [zoom, stream, hasZoom]);
 
   // Stop stream when component unmounts
   useEffect(() => {
@@ -338,6 +361,23 @@ export default function WebcamCapture({
         <span className={styles.captureIcon}>📸</span>
         {countdown !== null ? 'Get Ready...' : 'Capture Photo'}
       </button>
+
+      {/* Zoom Control */}
+      {isReady && hasZoom && zoomRange.max > zoomRange.min && (
+        <div className={styles.zoomControl}>
+          <span className={styles.zoomLabel}>Zoom</span>
+          <input
+            type="range"
+            min={zoomRange.min}
+            max={zoomRange.max}
+            step="0.1"
+            value={zoom}
+            onChange={(e) => setZoom(parseFloat(e.target.value))}
+            className={styles.zoomSlider}
+          />
+          <span className={styles.zoomValue}>{zoom.toFixed(1)}x</span>
+        </div>
+      )}
     </div>
   );
 }
