@@ -141,7 +141,7 @@ export default function DownloadPanel({
           <p className={styles.qrLabel}>Scan to download on your phone</p>
           <div className={styles.qrContainer}>
             <QRCodeSVG 
-              value={shareUrl}
+              value={downloadUrl || shareUrl}
               size={140}
               level="M"
               bgColor="transparent"
