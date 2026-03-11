@@ -314,7 +314,11 @@ async def update_template_config(template_id: str, config: TemplateConfigUpdate)
         
         clear_template_cache()
         print(f"DEBUG: Saved template config: {template_id}")
-        return {"success": True, "config": template_json}
+        # Clear caches so the new configuration is picked up immediately
+        from services.compose import clear_template_cache
+        clear_template_cache()
+        
+        return {"success": True, "message": "Template saved successfully"}
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Save failed: {str(e)}")

@@ -33,6 +33,7 @@ export default function PreviewEditScreen({
   const [isExtracting, setIsExtracting] = useState(true);
   const [extractedSrc, setExtractedSrc] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [templateConfig, setTemplateConfig] = useState<any>(null);
 
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const [scale, setScale] = useState(1);
@@ -87,10 +88,17 @@ export default function PreviewEditScreen({
     }
 
     extract();
+    
+    // Also fetch template config to know if we should apply a filter in the editor
+    fetch(`${API_BASE_URL}/api/admin/templates/${selectedTemplate}/config`)
+      .then(res => res.json())
+      .then(data => setTemplateConfig(data))
+      .catch(err => console.error("Failed to load template config:", err));
+
     return () => {
       active = false;
     };
-  }, [rawImage, anchorMode]);
+  }, [rawImage, anchorMode, selectedTemplate]);
 
   // Gesture Tracking State
   const pointers = useRef<Map<number, { x: number, y: number }>>(new Map());
@@ -238,6 +246,11 @@ export default function PreviewEditScreen({
                 ref={stickerRef}
                 src={extractedSrc} 
                 className={styles.extractedImg} 
+                style={{
+                  filter: templateConfig?.stickerFilter === 'bw' 
+                    ? 'grayscale(1) contrast(1.2)' 
+                    : undefined
+                }}
                 alt="Your Cutout" 
                 draggable={false} 
               />

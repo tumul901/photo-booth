@@ -93,8 +93,8 @@
 
 .extractedImg {
   display: block;
-  max-width: 100%;
-  max-height: 100%;
+  width: 350px; /* Normalize initial size for high-res cameras */
+  height: auto;
   object-fit: contain;
   pointer-events: none; /* Let wrapper handle drag */
   filter: drop-shadow(0 4px 12px rgba(0,0,0,0.5));
