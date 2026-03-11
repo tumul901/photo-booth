@@ -134,7 +134,7 @@ export default function PreviewEditScreen({
       
       if (initialPinchDist.current > 10) { // Avoid division by zero/tiny numbers
         const zoomFactor = currentDist / initialPinchDist.current;
-        const newScale = Math.min(Math.max(initialScale.current * zoomFactor, 0.25), 4);
+        const newScale = Math.min(Math.max(initialScale.current * zoomFactor, 0.05), 4);
         setScale(newScale);
       }
     }
@@ -254,9 +254,9 @@ export default function PreviewEditScreen({
             <input 
               type="range" 
               className={styles.slider}
-              min="0.25" 
+              min="0.05" 
               max="3" 
-              step="0.05" 
+              step="0.02" 
               value={scale} 
               onChange={e => setScale(parseFloat(e.target.value))} 
             />

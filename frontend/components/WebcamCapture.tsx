@@ -92,14 +92,14 @@ export default function WebcamCapture({
         const ratioValue = getAspectRatioValue(aspectRatio);
         const isPortrait = ratioValue < 1.0;
         
-        // Request constraints that match the intended orientation
-        // This is crucial for phones: it tells the browser to use the full sensor height
+        // Request constraints that maximize the field of view
+        // We remove explicit aspectRatio here to prevent the browser from cropping the sensor
         const constraints: MediaStreamConstraints = { 
           video: { 
             facingMode: facingMode,
             width: isPortrait ? { ideal: 1080, min: 480 } : { ideal: 1920, min: 640 },
             height: isPortrait ? { ideal: 1920, min: 640 } : { ideal: 1080, min: 480 },
-            aspectRatio: { ideal: ratioValue }
+            // Removed strict aspectRatio to get the widest possible native sensor feed
           },
           audio: false,
         };
