@@ -9,6 +9,7 @@ from services.storage_service import storage_service
 from config import settings
 from pathlib import Path
 from pydantic import BaseModel
+from services.compose import clear_template_cache
 
 router = APIRouter()
 
@@ -164,6 +165,7 @@ async def upload_template(
         with open(meta_path, "w") as f:
             json.dump(meta, f, indent=2)
             
+        clear_template_cache()
         return {"success": True, "template": meta}
         
     except Exception as e:
@@ -182,19 +184,29 @@ async def delete_template(template_id: str):
         with open(meta_path, 'r') as f:
             meta = json.load(f)
             
-        image_path = os.path.join(TEMPLATES_DIR, meta.get("png_path", ""))
+        png_path = meta.get("png_path") or meta.get("pngUrl")
         
-        # Delete meta file
+        # Delete meta file first so it's gone from the UI immediately
         os.remove(meta_path)
         
-        # Delete image file
-        if os.path.exists(image_path):
-            os.remove(image_path)
+        # Then attempt to delete associated image file
+        if png_path:
+            # Fix legacy paths (strip "templates/" prefix if exists)
+            if png_path.startswith("templates/") or png_path.startswith("templates\\"):
+                png_path = os.path.basename(png_path)
             
+            image_path = os.path.join(TEMPLATES_DIR, png_path)
+            if os.path.exists(image_path) and os.path.isfile(image_path):
+                os.remove(image_path)
+                print(f"DEBUG: Deleted template image: {image_path}")
+            
+        clear_template_cache()
         return {"success": True}
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")
+        print(f"ERROR deleting template: {e}")
+        # Even if we hit an error here, the meta file might already be gone
+        return {"success": True, "warning": f"Template metadata deleted, but hit an error: {str(e)}"}
 
 
 # --- Template Configuration (from Visual Editor) ---
@@ -220,6 +232,9 @@ class TemplateConfigUpdate(BaseModel):
     desiredFaceRatio: float
     minZoom: float
     maxZoom: float
+    stickerFilter: str = "none"
+    showVisualGuide: bool = False
+    allowManualPositioning: bool = False
 
 
 @router.put("/templates/{template_id}/config")
@@ -263,6 +278,9 @@ async def update_template_config(template_id: str, config: TemplateConfigUpdate)
             "compositeMode": config.compositeMode,
             "pngUrl": original_png_url,
             "anchorMode": config.anchorMode,
+            "stickerFilter": config.stickerFilter,
+            "showVisualGuide": config.showVisualGuide,
+            "allowManualPositioning": config.allowManualPositioning,
             "dimensions": config.dimensions,
             "slots": [
                 {
@@ -294,6 +312,7 @@ async def update_template_config(template_id: str, config: TemplateConfigUpdate)
         with open(meta_path, 'w') as f:
             json.dump(template_json, f, indent=2)
         
+        clear_template_cache()
         print(f"DEBUG: Saved template config: {template_id}")
         return {"success": True, "config": template_json}
         

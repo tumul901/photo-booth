@@ -5,9 +5,10 @@
   "compositeMode": "overlay",
   "pngUrl": "doritos2.png",
   "anchorMode": "bbox_center",
+  "stickerFilter": "bw",
   "dimensions": {
-    "width": 4167,
-    "height": 4167
+    "width": 400,
+    "height": 400
   },
   "slots": [
     {

@@ -13,6 +13,7 @@
   justify-content: space-between;
   align-items: center;
   display: flex;
+  width: 100%;
 }
 
 .title {
@@ -35,6 +36,8 @@
   font-size: 0.85rem;
   cursor: pointer;
   transition: all var(--transition-base);
+  min-width: 80px;
+  white-space: nowrap;
 }
 
 .backButton:hover {
@@ -47,14 +50,14 @@
 }
 
 .scrollArea {
-  padding: var(--space-sm) 0;
+  padding: var(--space-lg) 0 var(--space-sm);
   flex: 1;
   overflow-y: auto;
   mask-image: linear-gradient(transparent 0%, #000 3% 97%, transparent 100%);
 }
 
 .footer {
-  padding: var(--space-md) 0 var(--space-sm);
+  padding: var(--space-2xl) 0 var(--space-xl);
   flex-shrink: 0;
   justify-content: center;
   display: flex;

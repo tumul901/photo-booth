@@ -16,8 +16,10 @@ from config import settings
 async def lifespan(app: FastAPI):
     """Pre-warm heavy models on startup so the first request isn't slow."""
     from services.rembg_service import rembg_service
+    from services.stats_service import stats_service
     rembg_service.warm_up()
     yield
+    stats_service.flush()
 
 
 app = FastAPI(

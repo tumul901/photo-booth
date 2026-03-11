@@ -213,5 +213,42 @@
     0 0 0 9999px rgba(0, 0, 0, 0.5),
     inset 0 0 20px rgba(255, 255, 255, 0.1);
   transition: all 0.3s ease;
+  position: relative; /* Context for silhouette */
+}
+
+/* Silhouette Guide Overlay */
+.silhouetteGuide {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end; /* anchor to bottom of crop frame */
+  justify-content: center;
+  pointer-events: none;
+  padding-bottom: 5%;
+}
+
+.silhouetteSvg {
+  height: 100%; /* Take up full crop frame height */
+  width: 100%;
+  object-fit: contain;
+  opacity: 0.45; /* Let user see through it */
+  pointer-events: none;
+}
+
+.mirroredSvg {
+  transform: scaleX(-1);
+}
+
+.silhouettePath {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.8);
+  stroke-width: 4;
+  stroke-dasharray: 10 10;
+}
+
+@keyframes pulseOpacity {
+  0% { opacity: 0.3; }
+  50% { opacity: 0.6; }
+  100% { opacity: 0.3; }
 }
 

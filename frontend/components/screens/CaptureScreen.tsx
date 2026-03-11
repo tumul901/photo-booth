@@ -15,6 +15,7 @@ import styles from './CaptureScreen.module.css';
 type CaptureMode = 'webcam' | 'upload';
 
 interface CaptureScreenProps {
+  selectedTemplate: string;
   onCapture: (imageData: string) => void;
   onBack: () => void;
   onError: (msg: string) => void;
@@ -22,6 +23,7 @@ interface CaptureScreenProps {
 }
 
 export default function CaptureScreen({
+  selectedTemplate,
   onCapture,
   onBack,
   onError,
@@ -59,6 +61,7 @@ export default function CaptureScreen({
       <div className={styles.captureWrapper}>
         {captureMode === 'webcam' ? (
           <WebcamCapture
+            selectedTemplate={selectedTemplate}
             onCapture={onCapture}
             onError={onError}
             mirrored={true}

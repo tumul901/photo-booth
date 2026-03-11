@@ -114,7 +114,7 @@ class LocalStorageProvider(StorageProvider):
         image: Image.Image,
         filename: Optional[str] = None,
         format: str = "JPEG",
-        quality: int = 85,
+        quality: int = 95,
     ) -> StorageResult:
         """Save image to local filesystem."""
         output_id = filename or f"{uuid.uuid4().hex}"
@@ -132,6 +132,8 @@ class LocalStorageProvider(StorageProvider):
         t = time.perf_counter()
         if format.upper() == "JPEG":
             save_image.save(filepath, format="JPEG", quality=quality)
+        elif format.upper() == "WEBP":
+            save_image.save(filepath, format="WEBP", quality=quality, method=4)
         else:
             save_image.save(filepath, format=format)
         print(f"PERF:     encode:  {time.perf_counter() - t:.2f}s ({file_ext}, {os.path.getsize(filepath) / 1024:.0f}KB)", flush=True)
@@ -225,7 +227,7 @@ class S3StorageProvider(StorageProvider):
         image: Image.Image,
         filename: Optional[str] = None,
         format: str = "JPEG",
-        quality: int = 85,
+        quality: int = 95,
     ) -> StorageResult:
         """Save image to S3. Encodes immediately, uploads in foreground by default.
         Use save_image_deferred() + upload_deferred() to defer the upload."""
@@ -238,7 +240,7 @@ class S3StorageProvider(StorageProvider):
         image: Image.Image,
         filename: Optional[str] = None,
         format: str = "JPEG",
-        quality: int = 85,
+        quality: int = 95,
     ):
         """Save image to LOCAL DISK first (instant), then upload to S3 in background.
         Returns (StorageResult, upload_coroutine)."""
@@ -258,6 +260,8 @@ class S3StorageProvider(StorageProvider):
         t = time.perf_counter()
         if format.upper() == "JPEG":
             save_image.save(local_path, format="JPEG", quality=quality)
+        elif format.upper() == "WEBP":
+            save_image.save(local_path, format="WEBP", quality=quality, method=4)
         else:
             save_image.save(local_path, format=format)
         file_size = os.path.getsize(local_path)

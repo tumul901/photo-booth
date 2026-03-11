@@ -24,6 +24,7 @@
   scroll-snap-type: x mandatory;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
+  justify-content: center; /* Center items if they don't fill the width */
 }
 
 .templateGrid::-webkit-scrollbar {
@@ -61,8 +62,8 @@
 
 /* Preview Wrapper */
 .previewWrapper {
-  width: 70px;
-  height: 90px;
+  width: 100px;
+  height: 130px;
   display: flex;
   align-items: center;
   justify-content: center;

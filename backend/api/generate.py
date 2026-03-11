@@ -54,8 +54,8 @@ async def generate_composite(
     template_id: str = Form(...),
     photos: List[UploadFile] = File(...),
     slot_assignments: Optional[str] = Form(None),
-    processing_mode: str = Form("sticker"),  # "sticker" (remove bg) or "frame" (no bg removal)
-    photo_position: Optional[str] = Form(None),  # JSON: {"x", "y", "scale"} from editor
+    processing_mode: str = Form("sticker"),  # "sticker", "frame", "pre_extracted"
+    photo_position: Optional[str] = Form(None),  # JSON: {"x", "y", "scale", "editorWidth"}
 ):
     """
     Generate a composited photo from uploaded image(s) and a template.
@@ -82,7 +82,7 @@ async def generate_composite(
             raise HTTPException(status_code=400, detail="At least one photo is required")
         
         # Validate processing mode
-        if processing_mode not in ["sticker", "frame"]:
+        if processing_mode not in ["sticker", "frame", "pre_extracted"]:
             processing_mode = "sticker"
         
         # Load template metadata
@@ -126,8 +126,9 @@ async def generate_composite(
                 print(f"PERF:   rembg:     {time.perf_counter() - t_step:.2f}s", flush=True)
                 
                 # 2. Crop logic (Robust Tight Crop)
-                # We crop strictly to alpha bbox to remove empty space
-                sticker_image = compose_service.crop_to_alpha_bbox(sticker_image)
+                # We crop strictly to alpha bbox to remove empty space, UNLESS full_frame is requested
+                anchor_mode = getattr(template_meta, 'anchor_mode', 'bbox_center')
+                sticker_image = compose_service.crop_to_alpha_bbox(sticker_image, anchor_mode=anchor_mode)
                 
                 # 3. Face Detection
                 # Must be run on the cropped sticker to get correct relative coordinates
@@ -141,6 +142,13 @@ async def generate_composite(
                 except Exception as e:
                     print(f"DEBUG: Face detection failed: {e}", flush=True)
                 print(f"PERF:   face:      {time.perf_counter() - t_step:.2f}s", flush=True)
+
+            elif processing_mode == "pre_extracted":
+                # Image is already a transparent PNG from /api/extract
+                sticker_image = Image.open(BytesIO(photo_bytes)).convert("RGBA")
+                # We can skip landmarks detection unless strictly needed, 
+                # but since we are manually positioning, landmarks aren't needed.
+                landmarks = None
 
             else:
                 # Frame mode: simple load
@@ -182,13 +190,25 @@ async def generate_composite(
             # Photo fills the canvas, frame overlays on top.
             # The frame PNG's own transparency defines the visible window.
             
-            print(f"DEBUG FRAME: Starting simple frame compose. Canvas={template_meta.width}x{template_meta.height}", flush=True)
+            # Helper to load template image (moved from compose_service to avoid circular dep)
+            def _load_template_image(path):
+                try:
+                    return Image.open(path).convert("RGBA")
+                except FileNotFoundError:
+                    raise HTTPException(status_code=404, detail=f"Template image not found at {path}")
             
-            # Load the frame PNG first to get its actual dimensions
-            frame = Image.open(template_path).convert("RGBA")
-            canvas_w, canvas_h = frame.size
+            template_path = os.path.join(TEMPLATES_DIR, template_meta.png_path)
+            frame = _load_template_image(template_path).copy()
             
-            # Create canvas and fill with the user's photo (scaled to cover)
+            # Smart Auto-Upscaling: Target at least 1080p width or height
+            res_multiplier = max(1.0, 1080 / min(template_meta.width, template_meta.height))
+            
+            canvas_w = int(template_meta.width * res_multiplier)
+            canvas_h = int(template_meta.height * res_multiplier)
+            
+            print(f"DEBUG FRAME: Using scaled canvas {canvas_w}x{canvas_h} (multiplier={res_multiplier:.2f})", flush=True)
+            
+            # 1. Start with background or transparent canvas
             canvas = Image.new("RGBA", (canvas_w, canvas_h), (255, 255, 255, 255))
             
             if processed_stickers:
@@ -215,7 +235,10 @@ async def generate_composite(
                 canvas.paste(photo_cropped, (0, 0))
                 print(f"DEBUG FRAME: Photo placed full-canvas ({canvas_w}x{canvas_h})", flush=True)
             
-            # Overlay frame on top — its transparency is the window
+            # Overlay frame on top — ensure it is resized to match high-res canvas
+            if frame.size != (canvas_w, canvas_h):
+                frame = frame.resize((canvas_w, canvas_h), Image.Resampling.LANCZOS)
+                
             final_image = Image.alpha_composite(canvas, frame)
             print(f"DEBUG FRAME: Frame overlaid. Done!", flush=True)
         else:
@@ -261,6 +284,36 @@ async def generate_composite(
             error=str(e),
         )
 
+@router.post("/extract")
+async def extract_sticker(
+    photo: UploadFile = File(...),
+    anchor_mode: str = Form("bbox_center"),
+):
+    """
+    Extracts the subject from the background and returns the transparent PNG directly.
+    Used for frontend interactive sticker positioning.
+    """
+    try:
+        photo_bytes = await photo.read()
+        
+        # 1. Remove background
+        sticker_image = await rembg_service.remove_background(photo_bytes)
+        
+        # 2. Crop to alpha bbox (if not full_frame)
+        sticker_image = compose_service.crop_to_alpha_bbox(sticker_image, anchor_mode=anchor_mode)
+        
+        # Save to buffer and return
+        buf = BytesIO()
+        sticker_image.save(buf, format="PNG")
+        buf.seek(0)
+        
+        return Response(content=buf.getvalue(), media_type="image/png")
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/download/{output_id}")
 async def download_output(output_id: str):
@@ -275,6 +328,7 @@ async def download_output(output_id: str):
             local_path,
             media_type=media_type,
             filename=f"photobooth-{output_id}.{ext}",
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
         )
     
     # Fallback: fetch from S3 (for older images not in local cache)
@@ -285,7 +339,10 @@ async def download_output(output_id: str):
     return Response(
         content=image_bytes,
         media_type="image/jpeg",
-        headers={"Content-Disposition": f'attachment; filename="photobooth-{output_id}.jpg"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="photobooth-{output_id}.jpg"',
+            "Cache-Control": "public, max-age=31536000, immutable"
+        },
     )
 
 
@@ -308,9 +365,18 @@ async def get_share_info(output_id: str):
     }
 
 
+_templates_list_cache = None
+_templates_list_ts = 0
+_TEMPLATES_LIST_TTL = 60  # seconds
+
 @router.get("/templates")
 async def list_templates():
     """List all available templates with their metadata."""
+    global _templates_list_cache, _templates_list_ts
+    now = time.time()
+    if _templates_list_cache is not None and (now - _templates_list_ts) < _TEMPLATES_LIST_TTL:
+        return _templates_list_cache
+
     templates = []
     
     print(f"DEBUG: Scanning templates dir: {TEMPLATES_DIR}", flush=True)
@@ -336,7 +402,10 @@ async def list_templates():
         print("DEBUG: Templates dir does not exist!", flush=True)
     
     print(f"DEBUG: Found {len(templates)} templates", flush=True)
-    return {"templates": templates}
+    result = {"templates": templates}
+    _templates_list_cache = result
+    _templates_list_ts = now
+    return result
 
 
 @router.get("/templates/{template_id}/image")

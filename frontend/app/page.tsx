@@ -15,6 +15,7 @@ import StepIndicator from '../components/StepIndicator';
 import ModeSelectScreen from '../components/screens/StartScreen';
 import TemplateScreen from '../components/screens/TemplateScreen';
 import CaptureScreen from '../components/screens/CaptureScreen';
+import PreviewEditScreen from '../components/screens/PreviewEditScreen';
 import ResultScreen from '../components/screens/ResultScreen';
 import styles from './page.module.css';
 
@@ -99,6 +100,9 @@ export default function BoothPage() {
   const [result, setResult] = useSessionState<ResultData | null>('result', null);
 
   // Transient state (not persisted — doesn't survive refresh by design)
+  const [isEditing, setIsEditing] = useState(false);
+  const [rawImage, setRawImage] = useState<string | null>(null);
+  const [templateConfig, setTemplateConfig] = useState<any>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -122,27 +126,65 @@ export default function BoothPage() {
     setError(null);
   }, [setStep]);
 
-  const handleImageCapture = useCallback(async (imageData: string) => {
-    setError(null);
+  const compressImage = async (dataUrl: string, maxWidth = 1920, maxHeight = 1920, quality = 0.85): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxWidth || height > maxHeight) {
+          if (width > height) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          } else {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return reject(new Error('Canvas context failed'));
+        // Fill white background in case of transparent PNG
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error('Compression failed'));
+        }, 'image/jpeg', quality);
+      };
+      img.onerror = () => reject(new Error('Image load failed'));
+      img.src = dataUrl;
+    });
+  };
 
-    if (!selectedTemplate) {
-      setError('Please select a template first.');
-      return;
-    }
-
+  const executeGeneration = async (imageData: string, pMode: string, positionData?: any) => {
     setIsProcessing(true);
     setResult(null);
+    setError(null);
 
     try {
-      // Convert base64 data URL to Blob
-      const response = await fetch(imageData);
-      const blob = await response.blob();
+      let blob: Blob;
+      
+      if (pMode === 'pre_extracted') {
+        // Skip canvas compression to preserve exact PNG transparency from the extraction API
+        const res = await fetch(imageData);
+        blob = await res.blob();
+      } else {
+        // Compress natural webcam captures as JPEG
+        blob = await compressImage(imageData);
+      }
 
       // Build FormData
       const formData = new FormData();
       formData.append('template_id', selectedTemplate);
-      formData.append('photos', blob, 'photo.png');
-      formData.append('processing_mode', processingMode);
+      formData.append('photos', blob, pMode === 'pre_extracted' ? 'photo.png' : 'photo.jpg');
+      formData.append('processing_mode', pMode);
+      
+      if (positionData) {
+        formData.append('photo_position', JSON.stringify(positionData));
+      }
 
       // Send to backend
       console.time('API Generate Request');
@@ -175,7 +217,41 @@ export default function BoothPage() {
     } finally {
       setIsProcessing(false);
     }
-  }, [selectedTemplate, processingMode, setResult, setStep]);
+  };
+
+  const handleImageCapture = useCallback(async (imageData: string) => {
+    setError(null);
+
+    if (!selectedTemplate) {
+      setError('Please select a template first.');
+      return;
+    }
+
+    // Check if template permits interactive manual positioning
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/templates/${selectedTemplate}/config`);
+      if (res.ok) {
+        const config = await res.json();
+        if (config.allowManualPositioning) {
+          setRawImage(imageData);
+          setTemplateConfig(config);
+          setIsEditing(true);
+          return;
+        }
+      }
+    } catch (e) {
+      console.error("Config fetch failed, proceeding to direct generate");
+    }
+
+    // Standard auto-compose flow
+    executeGeneration(imageData, processingMode);
+  }, [selectedTemplate, processingMode]);
+
+  const handleEditComplete = useCallback((extractedBase64: string, position: any) => {
+    setIsEditing(false);
+    // Submit the already-transparent image using the special pre_extracted mode
+    executeGeneration(extractedBase64, "pre_extracted", position);
+  }, [selectedTemplate, processingMode]);
 
   const handleStartOver = useCallback(() => {
     clearSession();
@@ -223,12 +299,23 @@ export default function BoothPage() {
           />
         )}
 
-        {step === 3 && (
+        {step === 3 && !isEditing && (
           <CaptureScreen
+            selectedTemplate={selectedTemplate}
             onCapture={handleImageCapture}
             onBack={handleBack}
             onError={handleError}
             isProcessing={isProcessing}
+          />
+        )}
+
+        {step === 3 && isEditing && rawImage && templateConfig && (
+          <PreviewEditScreen
+            selectedTemplate={selectedTemplate}
+            rawImage={rawImage}
+            anchorMode={templateConfig.anchorMode}
+            onComplete={handleEditComplete}
+            onCancel={() => { setIsEditing(false); setRawImage(null); }}
           />
         )}
 

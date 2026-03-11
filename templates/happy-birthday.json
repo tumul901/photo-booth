@@ -1,12 +1,14 @@
 {
   "templateId": "happy-birthday",
   "name": "Happy Birthday",
-  "templateType": "frame",
+  "templateType": "sticker",
+  "compositeMode": "background",
   "pngUrl": "happy birthday.png",
   "anchorMode": "bbox_center",
+  "stickerFilter": "bw",
   "dimensions": {
-    "width": 400,
-    "height": 600
+    "width": 262,
+    "height": 400
   },
   "slots": [
     {
@@ -19,12 +21,15 @@
         "targetX": 200,
         "targetY": 290
       },
+      "desiredFaceRatio": 0.25,
+      "minZoom": 0.5,
+      "maxZoom": 2.5,
       "zIndex": 0
     }
   ],
   "metadata": {
-    "category": "birthday",
-    "tags": ["birthday", "celebration", "party"],
-    "author": "Cloudplay XP"
+    "category": "custom",
+    "tags": [],
+    "author": "Admin"
   }
 }

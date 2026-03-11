@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from datetime import datetime
 from typing import Dict, Any, Optional
 
@@ -7,6 +8,9 @@ class StatsService:
     def __init__(self, data_dir: str = "data"):
         self.data_dir = data_dir
         self.stats_file = os.path.join(data_dir, "stats.json")
+        self._dirty = False
+        self._last_flush = time.time()
+        self._flush_interval = 30  # seconds
         self._ensure_data_dir()
         self._load_stats()
 
@@ -42,6 +46,13 @@ class StatsService:
         with open(self.stats_file, 'w') as f:
             json.dump(self.stats, f, indent=2)
 
+    def flush(self):
+        """Flush in-memory stats to disk if dirty."""
+        if self._dirty:
+            self._save_stats()
+            self._dirty = False
+            self._last_flush = time.time()
+
     def increment_generation(self, mode: str, template_id: str):
         """Increment generation counts."""
         self.stats["total_generated"] += 1
@@ -56,10 +67,15 @@ class StatsService:
             self.stats["by_template"][template_id] = 0
         self.stats["by_template"][template_id] += 1
         
-        self._save_stats()
+        self._dirty = True
+        
+        # Auto-flush if interval exceeded
+        if time.time() - self._last_flush > self._flush_interval:
+            self.flush()
 
     def get_stats(self) -> Dict[str, Any]:
         """Return current stats."""
+        self.flush()
         # Reload to ensure freshness if multiple workers (simplified)
         self._load_stats()
         return self.stats

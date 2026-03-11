@@ -1,0 +1,37 @@
+{
+  "templateId": "doodle",
+  "name": "doodle",
+  "templateType": "sticker",
+  "compositeMode": "background",
+  "pngUrl": "doodle.png",
+  "anchorMode": "full_frame",
+  "stickerFilter": "none",
+  "showVisualGuide": true,
+  "allowManualPositioning": true,
+  "dimensions": {
+    "width": 400,
+    "height": 225
+  },
+  "slots": [
+    {
+      "slotId": "slot1",
+      "x": 144,
+      "y": 14,
+      "width": 108,
+      "height": 204,
+      "anchor": {
+        "targetX": 54,
+        "targetY": 71
+      },
+      "desiredFaceRatio": 0.2,
+      "minZoom": 0.5,
+      "maxZoom": 2.5,
+      "zIndex": 0
+    }
+  ],
+  "metadata": {
+    "category": "custom",
+    "tags": [],
+    "author": "Admin"
+  }
+}

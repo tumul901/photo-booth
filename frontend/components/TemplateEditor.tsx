@@ -31,6 +31,7 @@ interface TemplateConfig {
   name: string;
   templateType: 'frame' | 'sticker';
   compositeMode: 'background' | 'overlay';
+  stickerFilter: 'none' | 'bw' | 'sketch';
   pngUrl: string;
   anchorMode: 'face_center' | 'eyes' | 'none';
   dimensions: { width: number; height: number };
@@ -38,6 +39,8 @@ interface TemplateConfig {
   desiredFaceRatio: number;
   minZoom: number;
   maxZoom: number;
+  showVisualGuide: boolean;
+  allowManualPositioning: boolean;
 }
 
 interface TemplateEditorProps {
@@ -85,10 +88,13 @@ export default function TemplateEditor({
   // Config settings
   const [templateType, setTemplateType] = useState<'frame' | 'sticker'>('sticker');
   const [compositeMode, setCompositeMode] = useState<'background' | 'overlay'>('background');
+  const [stickerFilter, setStickerFilter] = useState<'none' | 'bw' | 'sketch'>('none');
   const [anchorMode, setAnchorMode] = useState<'face_center' | 'eyes' | 'none'>('face_center');
   const [desiredFaceRatio, setDesiredFaceRatio] = useState(0.25);
   const [minZoom, setMinZoom] = useState(0.5);
   const [maxZoom, setMaxZoom] = useState(2.5);
+  const [showVisualGuide, setShowVisualGuide] = useState(false);
+  const [allowManualPositioning, setAllowManualPositioning] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
 
   // Fetch existing config when editor opens
@@ -108,10 +114,13 @@ export default function TemplateEditor({
         // Apply loaded config to state
         if (config.templateType) setTemplateType(config.templateType);
         if (config.compositeMode) setCompositeMode(config.compositeMode);
+        if (config.stickerFilter) setStickerFilter(config.stickerFilter);
         if (config.anchorMode) setAnchorMode(config.anchorMode);
         if (config.desiredFaceRatio) setDesiredFaceRatio(config.desiredFaceRatio);
         if (config.minZoom) setMinZoom(config.minZoom);
         if (config.maxZoom) setMaxZoom(config.maxZoom);
+        if (typeof config.showVisualGuide === 'boolean') setShowVisualGuide(config.showVisualGuide);
+        if (typeof config.allowManualPositioning === 'boolean') setAllowManualPositioning(config.allowManualPositioning);
         
         // Convert slots from backend format to editor format
         if (config.slots && config.slots.length > 0) {
@@ -391,6 +400,7 @@ export default function TemplateEditor({
       name: templateName,
       templateType,
       compositeMode,
+      stickerFilter,
       pngUrl: imageUrl.split('/').pop() || '',
       anchorMode,
       dimensions: imageDimensions,
@@ -403,6 +413,8 @@ export default function TemplateEditor({
       desiredFaceRatio,
       minZoom,
       maxZoom,
+      showVisualGuide,
+      allowManualPositioning,
     };
 
     onSave(config);
@@ -520,12 +532,52 @@ export default function TemplateEditor({
           </div>
           
           <div className={styles.settingRow}>
+            <label>Image Filter:</label>
+            <select value={stickerFilter} onChange={e => setStickerFilter(e.target.value as typeof stickerFilter)}>
+              <option value="none">None (Original Colors)</option>
+              <option value="bw">Black & White (High Contrast)</option>
+              <option value="sketch">Pencil Sketch</option>
+            </select>
+          </div>
+          
+          <div className={styles.settingRow}>
             <label>Anchor Mode:</label>
             <select value={anchorMode} onChange={e => setAnchorMode(e.target.value as typeof anchorMode)}>
               <option value="face_center">Face Center</option>
               <option value="eyes">Eyes</option>
+              <option value="full_frame">Full Frame (1:1 UI Overlay)</option>
               <option value="none">None (Bottom anchor)</option>
             </select>
+          </div>
+          
+          <div className={styles.settingRow} style={{ alignItems: 'center', marginTop: '1rem', marginBottom: '1rem' }}>
+            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: '8px' }}>
+              <input 
+                type="checkbox" 
+                checked={showVisualGuide} 
+                onChange={e => setShowVisualGuide(e.target.checked)} 
+                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+              />
+              Show Live Visual Guide to Users
+            </label>
+            <p className={styles.hint} style={{ margin: '4px 0 0 26px' }}>
+              If enabled, users will see the template image overlaid on the webcam to help them align. Best used with "Full Frame" anchor mode.
+            </p>
+          </div>
+
+          <div className={styles.settingRow} style={{ alignItems: 'center', marginBottom: '1rem' }}>
+            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: '8px' }}>
+              <input 
+                type="checkbox" 
+                checked={allowManualPositioning} 
+                onChange={e => setAllowManualPositioning(e.target.checked)} 
+                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+              />
+              Enable Interactive Repositioning
+            </label>
+            <p className={styles.hint} style={{ margin: '4px 0 0 26px' }}>
+              If enabled, users will get a new step after capture allowing them to manually drag and resize their photo over the template. Best used for Doodle.
+            </p>
           </div>
           
           <div className={styles.settingRow}>

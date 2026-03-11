@@ -32,6 +32,7 @@ interface TemplateConfig {
   name: string;
   templateType: 'frame' | 'sticker';
   compositeMode: 'background' | 'overlay';
+  stickerFilter: 'none' | 'bw' | 'sketch';
   pngUrl: string;
   anchorMode: 'face_center' | 'eyes' | 'none';
   dimensions: { width: number; height: number };

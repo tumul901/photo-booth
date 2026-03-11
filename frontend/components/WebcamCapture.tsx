@@ -26,13 +26,17 @@ const ASPECT_RATIOS: { id: AspectRatio; label: string; icon: string }[] = [
   { id: '16:9', label: 'Landscape', icon: '🖥️' },
 ];
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 interface WebcamCaptureProps {
+  selectedTemplate?: string;
   onCapture: (imageData: string) => void;
   onError?: (error: string) => void;
   mirrored?: boolean;
 }
 
 export default function WebcamCapture({
+  selectedTemplate,
   onCapture,
   onError,
   mirrored = true,
@@ -45,6 +49,8 @@ export default function WebcamCapture({
   const [countdown, setCountdown] = useState<number | null>(null);
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('9:16'); // Default portrait
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+  
+  const [showGuide, setShowGuide] = useState(false);
 
   const toggleCamera = useCallback(() => {
     setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
@@ -55,6 +61,23 @@ export default function WebcamCapture({
     const [w, h] = ratio.split(':').map(Number);
     return w / h;
   };
+
+  // Fetch true template dimensions to enforce WYSIWYG crop
+  useEffect(() => {
+    if (!selectedTemplate) {
+      setShowGuide(false);
+      return;
+    }
+    
+    fetch(`${API_BASE_URL}/api/admin/templates/${selectedTemplate}/config`)
+      .then(res => res.json())
+      .then(data => {
+        if (data && typeof data.showVisualGuide === 'boolean') {
+          setShowGuide(data.showVisualGuide);
+        }
+      })
+      .catch(err => console.error("Failed to load template configuration:", err));
+  }, [selectedTemplate]);
 
   // Initialize webcam on mount or when camera changes
   useEffect(() => {
@@ -263,6 +286,17 @@ export default function WebcamCapture({
         {isReady && !error && (
           <div className={styles.cropOverlay}>
             <div className={styles.cropFrame} style={getCropOverlayStyle()} />
+            
+            {/* Live Template alignment guide */}
+            {selectedTemplate && showGuide && (
+              <div className={styles.silhouetteGuide}>
+                <img 
+                  src={`${API_BASE_URL}/api/admin/templates/${selectedTemplate}/image`} 
+                  alt="Template Guide" 
+                  className={`${styles.silhouetteSvg} ${mirrored && facingMode === 'user' ? styles.mirroredSvg : ''}`} 
+                />
+              </div>
+            )}
           </div>
         )}
         
