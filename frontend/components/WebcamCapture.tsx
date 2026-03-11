@@ -86,7 +86,8 @@ export default function WebcamCapture({
     async function initCamera() {
       try {
         // Determine orientation based on aspect ratio
-        const isPortrait = getAspectRatioValue(aspectRatio) < 1.0;
+        const ratioValue = getAspectRatioValue(aspectRatio);
+        const isPortrait = ratioValue < 1.0;
         
         // Request constraints that match the intended orientation
         // This is crucial for phones: it tells the browser to use the full sensor height
@@ -95,6 +96,7 @@ export default function WebcamCapture({
             facingMode: facingMode,
             width: isPortrait ? { ideal: 1080, min: 480 } : { ideal: 1920, min: 640 },
             height: isPortrait ? { ideal: 1920, min: 640 } : { ideal: 1080, min: 480 },
+            aspectRatio: { ideal: ratioValue }
           },
           audio: false,
         };
@@ -253,7 +255,10 @@ export default function WebcamCapture({
         ))}
       </div>
 
-      <div className={styles.videoWrapper}>
+      <div 
+        className={styles.videoWrapper}
+        style={{ aspectRatio: `${getAspectRatioValue(aspectRatio)}` }}
+      >
         {/* Flip Camera Button */}
         {isReady && !error && (
           <button 

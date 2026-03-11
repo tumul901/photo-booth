@@ -11,11 +11,15 @@
 .videoWrapper {
   position: relative;
   width: 100%;
-  min-height: 360px;
+  height: auto;
+  max-height: 75vh;
   background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
   border-radius: 16px;
   overflow: hidden;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
 .placeholder {
