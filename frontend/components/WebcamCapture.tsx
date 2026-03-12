@@ -125,11 +125,12 @@ export default function WebcamCapture({
           // Check for zoom capabilities
           const track = mediaStream.getVideoTracks()[0];
           const capabilities = track.getCapabilities() as any;
-          if (capabilities.zoom) {
-            setHasZoom(true);
-            setZoomRange({ min: capabilities.zoom.min, max: capabilities.zoom.max });
-            setZoom(capabilities.zoom.min);
-          } else {
+            if (capabilities.zoom) {
+              setHasZoom(true);
+              setZoomRange({ min: capabilities.zoom.min, max: capabilities.zoom.max });
+              // Default to 1.0 if supported, otherwise use the hardware minimum
+              setZoom(Math.max(capabilities.zoom.min, 1.0));
+            } else {
             setHasZoom(false);
           }
 
@@ -375,7 +376,7 @@ export default function WebcamCapture({
             onChange={(e) => setZoom(parseFloat(e.target.value))}
             className={styles.zoomSlider}
           />
-          <span className={styles.zoomValue}>{zoom.toFixed(1)}x</span>
+          <span className={styles.zoomValue}>{(zoom / 1.0).toFixed(1)}x</span>
         </div>
       )}
     </div>
