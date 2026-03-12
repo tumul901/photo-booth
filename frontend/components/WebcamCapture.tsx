@@ -5,11 +5,10 @@
  * =======================
  * Handles webcam video stream and photo capture for the booth.
  * 
- * Features:
- * - Aspect ratio selection (Portrait, Landscape, Square)
- * - Countdown timer before capture
- * - Mirror mode toggle
- * - High resolution capture
+ * Rebuilt Architecture:
+ * - Wrapper sized to selected output ratio.
+ * - Video uses object-fit: cover to fill wrapper (True WYSIWYG).
+ * - Canvas capture implements matching crop logic at native resolution.
  */
 
 import { useRef, useCallback, useState, useEffect } from 'react';
@@ -47,26 +46,26 @@ export default function WebcamCapture({
   const [error, setError] = useState<string | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
-  const [aspectRatio, setAspectRatio] = useState<AspectRatio>('9:16'); // Default portrait
+  const [aspectRatio, setAspectRatio] = useState<AspectRatio>('9:16');
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   
   const [showGuide, setShowGuide] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [zoomRange, setZoomRange] = useState({ min: 1, max: 1 });
   const [hasZoom, setHasZoom] = useState(false);
-  const [nativeRatio, setNativeRatio] = useState<number>(4/3); // Default typical webcam ratio
 
+  // Helper to toggle between front/back cameras
   const toggleCamera = useCallback(() => {
     setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
   }, []);
 
-  // Parse aspect ratio to numeric value
-  const getAspectRatioValue = (ratio: AspectRatio): number => {
+  // Get numeric aspect ratio value
+  const getAspectRatioValue = useCallback((ratio: AspectRatio): number => {
     const [w, h] = ratio.split(':').map(Number);
     return w / h;
-  };
+  }, []);
 
-  // Fetch true template dimensions to enforce WYSIWYG crop
+  // Fetch template visual guide settings
   useEffect(() => {
     if (!selectedTemplate) {
       setShowGuide(false);
@@ -80,32 +79,26 @@ export default function WebcamCapture({
           setShowGuide(data.showVisualGuide);
         }
       })
-      .catch(err => console.error("Failed to load template configuration:", err));
+      .catch(err => console.error("Template config error:", err));
   }, [selectedTemplate]);
 
-  // Initialize webcam on mount, when camera changes, or when orientation changes
+  // Main Camera Initialization Logic
   useEffect(() => {
     let mounted = true;
     
     async function initCamera() {
       try {
-        // Determine orientation based on aspect ratio
-        const ratioValue = getAspectRatioValue(aspectRatio);
-        const isPortrait = ratioValue < 1.0;
-        
-        // Request constraints that maximize the field of view
-        // We remove explicit aspectRatio here to prevent the browser from cropping the sensor
+        // Request widest possible sensor feed - no explicit orientation-based width/height swaps here.
+        // Let the system provide the best high-res feed it can.
         const constraints: MediaStreamConstraints = { 
           video: { 
-            facingMode: facingMode,
-            width: isPortrait ? { ideal: 1080, min: 480 } : { ideal: 1920, min: 640 },
-            height: isPortrait ? { ideal: 1920, min: 640 } : { ideal: 1080, min: 480 },
-            // Removed strict aspectRatio to get the widest possible native sensor feed
+            facingMode,
+            width: { ideal: 1920 },
+            height: { ideal: 1920 }
           },
           audio: false,
         };
 
-        // Stop previous stream before switching to avoid device-in-use errors
         if (stream) {
           stream.getTracks().forEach(track => track.stop());
         }
@@ -123,60 +116,47 @@ export default function WebcamCapture({
           setIsReady(true);
           setError(null);
           
-          // Check for zoom capabilities
+          // Detect Hardware Zoom
           const track = mediaStream.getVideoTracks()[0];
           const capabilities = track.getCapabilities() as any;
-            if (capabilities.zoom) {
-              setHasZoom(true);
-              setZoomRange({ min: capabilities.zoom.min, max: capabilities.zoom.max });
-              // Default to 1.0 if supported, otherwise use the hardware minimum
-              setZoom(Math.max(capabilities.zoom.min, 1.0));
-            } else {
+          if (capabilities.zoom) {
+            setHasZoom(true);
+            setZoomRange({ min: capabilities.zoom.min, max: capabilities.zoom.max });
+            // Always default to 1x to ensure widest natural FOV initially
+            setZoom(Math.max(capabilities.zoom.min, 1.0));
+          } else {
             setHasZoom(false);
           }
 
-          // Log actual resolution for debugging
           videoRef.current.onloadedmetadata = () => {
             if (videoRef.current) {
-              const { videoWidth, videoHeight } = videoRef.current;
-              console.log(`📷 Webcam resolution: ${videoWidth}×${videoHeight}`);
-              setNativeRatio(videoWidth / videoHeight);
+              console.log(`Webcam native resolution: ${videoRef.current.videoWidth}x${videoRef.current.videoHeight}`);
             }
           };
         }
       } catch (err) {
         if (!mounted) return;
-        
-        const errorMessage = err instanceof Error 
-          ? `Camera access denied: ${err.message}` 
-          : 'Camera access denied';
-        setError(errorMessage);
-        onError?.(errorMessage);
+        const msg = err instanceof Error ? err.message : 'Camera access error';
+        setError(msg);
+        onError?.(msg);
       }
     }
     
     initCamera();
-    
-    // Cleanup on unmount or dependency change
-    return () => {
-      mounted = false;
-    };
-  }, [onError, facingMode, getAspectRatioValue(aspectRatio) < 1.0]); // Re-init only if orientation flips
+    return () => { mounted = false; };
+  }, [facingMode]); // Only re-init when switching cameras, not on aspect ratio changes
 
-  // Apply zoom changes
+  // Synchronize zoom state to camera hardware
   useEffect(() => {
     if (!stream || !hasZoom) return;
     const track = stream.getVideoTracks()[0];
-    track.applyConstraints({
-      advanced: [{ zoom: zoom } as any]
-    }).catch(err => console.error("Failed to apply zoom:", err));
+    track.applyConstraints({ advanced: [{ zoom: zoom } as any] })
+      .catch(err => console.error("Zoom apply error:", err));
   }, [zoom, stream, hasZoom]);
 
-  // Stop stream when component unmounts
+  // Final capture cleanup
   useEffect(() => {
-    return () => {
-      stream?.getTracks().forEach(track => track.stop());
-    };
+    return () => stream?.getTracks().forEach(t => t.stop());
   }, [stream]);
 
   const capturePhoto = useCallback(() => {
@@ -187,109 +167,66 @@ export default function WebcamCapture({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
-    const videoWidth = video.videoWidth;
-    const videoHeight = video.videoHeight;
+    const vW = video.videoWidth;
+    const vH = video.videoHeight;
     
-    // Calculate crop region based on aspect ratio
+    // We must match the CSS "object-fit: cover" math perfectly
     const targetRatio = getAspectRatioValue(aspectRatio);
-    const videoRatio = videoWidth / videoHeight;
+    const videoRatio = vW / vH;
     
-    let cropWidth, cropHeight, cropX, cropY;
+    let sW, sH, sX, sY;
     
+    // Logic for "Cover": Fill the target container, cropping excess from center
     if (targetRatio > videoRatio) {
-      // Target is wider - crop top/bottom
-      cropWidth = videoWidth;
-      cropHeight = videoWidth / targetRatio;
-      cropX = 0;
-      cropY = (videoHeight - cropHeight) / 2;
+      // Container is wider than video feed - crop top/bottom
+      sW = vW;
+      sH = vW / targetRatio;
+      sX = 0;
+      sY = (vH - sH) / 2;
     } else {
-      // Target is taller - crop left/right
-      cropHeight = videoHeight;
-      cropWidth = videoHeight * targetRatio;
-      cropX = (videoWidth - cropWidth) / 2;
-      cropY = 0;
+      // Container is taller than video feed - crop sides
+      sH = vH;
+      sW = vH * targetRatio;
+      sX = (vW - sW) / 2;
+      sY = 0;
     }
     
-    // Set canvas to cropped dimensions
-    canvas.width = cropWidth;
-    canvas.height = cropHeight;
+    canvas.width = sW;
+    canvas.height = sH;
     
-    console.log(`📸 Capturing at: ${canvas.width}×${canvas.height} (${aspectRatio})`);
-    
-    // Apply mirror transformation if enabled (only for front camera)
-    const shouldMirror = mirrored && facingMode === 'user';
-    if (shouldMirror) {
+    // Handle Mirroring
+    const isMirrored = mirrored && facingMode === 'user';
+    if (isMirrored) {
       ctx.translate(canvas.width, 0);
       ctx.scale(-1, 1);
     }
 
-    // Draw cropped region from video to canvas
-    ctx.drawImage(
-      video,
-      cropX, cropY, cropWidth, cropHeight,  // Source rect
-      0, 0, cropWidth, cropHeight           // Dest rect
-    );
+    ctx.drawImage(video, sX, sY, sW, sH, 0, 0, sW, sH);
 
-    // Convert to base64 and return
-    const imageData = canvas.toDataURL('image/png');
-    onCapture(imageData);
-  }, [mirrored, onCapture, aspectRatio, facingMode]);
+    onCapture(canvas.toDataURL('image/png'));
+  }, [mirrored, onCapture, aspectRatio, facingMode, getAspectRatioValue]);
 
-  const startCountdown = useCallback(() => {
-    setCountdown(3);
-  }, []);
+  const startCountdown = useCallback(() => setCountdown(3), []);
 
   useEffect(() => {
     if (countdown === null) return;
-
     if (countdown > 0) {
-      const timer = setTimeout(() => {
-        setCountdown(countdown - 1);
-      }, 1000);
-      return () => clearTimeout(timer);
+      const t = setTimeout(() => setCountdown(countdown - 1), 1000);
+      return () => clearTimeout(t);
     } else {
-      // Countdown finished
       capturePhoto();
       setCountdown(null);
     }
   }, [countdown, capturePhoto]);
 
-  // Calculate crop overlay dimensions for preview
-  const getCropOverlayStyle = (): React.CSSProperties => {
-    const targetRatio = getAspectRatioValue(aspectRatio);
-    const containerRatio = nativeRatio;
-    
-    // We want the crop frame to represent where the canvas.toDataURL will clip
-    // Since the .video is object-fit: contain inside a wrapper of nativeRatio,
-    // they match perfectly. We just need to center the targetRatio inside containerRatio.
-    
-    if (targetRatio > containerRatio) {
-      // Target is wider than sensor (unlikely for portrait, but possible)
-      return { 
-        aspectRatio: `${targetRatio}`, 
-        width: '100%', 
-        height: `${(containerRatio / targetRatio) * 100}%`,
-      };
-    } else {
-      // Target is taller than sensor (standard phone portrait)
-      return { 
-        aspectRatio: `${targetRatio}`, 
-        height: '100%', 
-        width: `${(targetRatio / containerRatio) * 100}%`,
-      };
-    }
-  };
-
   return (
     <div className={styles.webcamContainer}>
-      {/* Aspect Ratio Selector */}
       <div className={styles.aspectSelector}>
         {ASPECT_RATIOS.map((ar) => (
           <button
             key={ar.id}
             className={`${styles.aspectButton} ${aspectRatio === ar.id ? styles.aspectActive : ''}`}
             onClick={() => setAspectRatio(ar.id)}
-            title={ar.label}
           >
             <span className={styles.aspectIcon}>{ar.icon}</span>
             <span className={styles.aspectLabel}>{ar.label}</span>
@@ -299,89 +236,64 @@ export default function WebcamCapture({
 
       <div 
         className={styles.videoWrapper}
-        style={{ aspectRatio: `${nativeRatio}` }}
+        style={{ aspectRatio: `${getAspectRatioValue(aspectRatio)}` }}
       >
-        {/* Flip Camera Button */}
         {isReady && !error && (
-          <button 
-            className={styles.flipButton} 
-            onClick={toggleCamera}
-            title="Flip Camera"
-          >
-            🔄
-          </button>
+          <button className={styles.flipButton} onClick={toggleCamera}>🔄</button>
         )}
 
-        {/* Show error if camera access failed */}
         {error && (
           <div className={styles.placeholder}>
             <span className={styles.cameraIcon}>🚫</span>
-            <p>Camera Unavailable</p>
             <p className={styles.hint}>{error}</p>
           </div>
         )}
         
-        {/* Show loading while initializing */}
         {!isReady && !error && (
           <div className={styles.placeholder}>
             <span className={styles.cameraIcon}>📷</span>
-            <p>Initializing Camera...</p>
-            <p className={styles.hint}>Please allow camera access</p>
+            <p>Initializing...</p>
           </div>
         )}
         
-        {/* Countdown Overlay */}
         {countdown !== null && countdown > 0 && (
           <div className={styles.countdownOverlay}>
-            <span className={styles.countdownNumber} key={countdown}>
-              {countdown}
-            </span>
+            <span className={styles.countdownNumber} key={countdown}>{countdown}</span>
           </div>
         )}
         
-        {/* Crop frame overlay */}
+        {/* The Frame is the container itself */}
         {isReady && !error && (
-          <div className={styles.cropOverlay}>
-            <div className={styles.cropFrame} style={getCropOverlayStyle()} />
-            
-            {/* Live Template alignment guide */}
-            {selectedTemplate && showGuide && (
-              <div className={styles.silhouetteGuide}>
-                <img 
-                  src={`${API_BASE_URL}/api/admin/templates/${selectedTemplate}/image`} 
-                  alt="Template Guide" 
-                  className={`${styles.silhouetteSvg} ${mirrored && facingMode === 'user' ? styles.mirroredSvg : ''}`} 
-                />
-              </div>
-            )}
+          <div className={styles.frameBorder} />
+        )}
+
+        {/* Template alignment guide */}
+        {selectedTemplate && showGuide && isReady && (
+          <div className={styles.templateGuide}>
+            <img 
+              src={`${API_BASE_URL}/api/admin/templates/${selectedTemplate}/image`} 
+              alt="Guide" 
+              className={`${styles.guideImage} ${mirrored && facingMode === 'user' ? styles.mirrored : ''}`} 
+            />
           </div>
         )}
-        
-        {/* Live video feed */}
+
         <video
           ref={videoRef}
           autoPlay
           playsInline
           muted
-          className={styles.video}
-          style={{ 
-            transform: (mirrored && facingMode === 'user') ? 'scaleX(-1)' : 'none',
-            display: isReady && !error ? 'block' : 'none',
-          }}
+          className={`${styles.video} ${mirrored && facingMode === 'user' ? styles.mirrored : ''}`}
+          style={{ display: isReady && !error ? 'block' : 'none' }}
         />
         <canvas ref={canvasRef} style={{ display: 'none' }} />
       </div>
 
-      <button
-        className={styles.captureButton}
-        onClick={startCountdown}
-        disabled={!isReady || countdown !== null}
-      >
+      <button className={styles.captureButton} onClick={startCountdown} disabled={!isReady || countdown !== null}>
         <span className={styles.captureIcon}>📸</span>
-        {countdown !== null ? 'Get Ready...' : 'Capture Photo'}
+        {countdown !== null ? 'Ready...' : 'Capture Photo'}
       </button>
 
-      {/* Zoom Control */}
       {isReady && hasZoom && zoomRange.max > zoomRange.min && (
         <div className={styles.zoomControl}>
           <span className={styles.zoomLabel}>Zoom</span>
@@ -394,7 +306,7 @@ export default function WebcamCapture({
             onChange={(e) => setZoom(parseFloat(e.target.value))}
             className={styles.zoomSlider}
           />
-          <span className={styles.zoomValue}>{(zoom / 1.0).toFixed(1)}x</span>
+          <span className={styles.zoomValue}>{zoom.toFixed(1)}x</span>
         </div>
       )}
     </div>

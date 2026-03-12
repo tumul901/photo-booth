@@ -13,13 +13,32 @@
   width: 100%;
   height: auto;
   max-height: 75vh;
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-  border-radius: 16px;
+  background: #000;
+  border-radius: 20px;
   overflow: hidden;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-  display: flex;
-  justify-content: center;
-  align-items: center;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  /* The aspectRatio is set via inline style based on selection */
+}
+
+/* Clear visual indicator of the capture frame */
+.frameBorder {
+  position: absolute;
+  inset: 0;
+  border: 4px solid rgba(255, 255, 255, 0.3);
+  border-radius: 20px;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover; /* Key change: fills the container */
+  background: #000;
+}
+
+.mirrored {
+  transform: scaleX(-1);
 }
 
 .placeholder {
@@ -27,61 +46,54 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 100%;
-  color: #e0e0e0;
+  position: absolute;
+  inset: 0;
+  color: #fff;
+  background: #111;
   text-align: center;
-  padding: 2rem;
+  z-index: 10;
 }
 
 .cameraIcon {
-  font-size: 4rem;
-  margin-bottom: 1rem;
-  opacity: 0.7;
-}
-
-.placeholder p {
-  margin: 0.25rem 0;
-  font-size: 1.125rem;
+  font-size: 3rem;
+  margin-bottom: 0.5rem;
+  opacity: 0.5;
 }
 
 .hint {
-  font-size: 0.875rem !important;
-  opacity: 0.6;
-}
-
-.video {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
+  font-size: 0.9rem;
+  opacity: 0.7;
+  padding: 0 1rem;
 }
 
 .captureButton {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 1rem 2.5rem;
+  padding: 1.25rem 3rem;
   font-size: 1.25rem;
-  font-weight: 600;
+  font-weight: 700;
   color: #fff;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #818cf8 0%, #c084fc 100%);
   border: none;
-  border-radius: 50px;
+  border-radius: 100px;
   cursor: pointer;
-  transition: all 0.3s ease;
-  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  box-shadow: 0 10px 25px rgba(129, 140, 248, 0.4);
 }
 
 .captureButton:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+  transform: translateY(-4px) scale(1.02);
+  box-shadow: 0 15px 35px rgba(129, 140, 248, 0.5);
 }
 
 .captureButton:active:not(:disabled) {
-  transform: translateY(0);
+  transform: translateY(0) scale(1);
 }
 
 .captureButton:disabled {
   opacity: 0.5;
+  filter: grayscale(1);
   cursor: not-allowed;
 }
 
@@ -90,32 +102,24 @@
   top: 1rem;
   right: 1rem;
   z-index: 20;
-  background: rgba(0, 0, 0, 0.4);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 50%;
-  width: 48px;
-  height: 48px;
+  width: 50px;
+  height: 50px;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 1.5rem;
   color: white;
   cursor: pointer;
-  backdrop-filter: blur(4px);
   transition: all 0.2s ease;
 }
 
 .flipButton:hover {
-  background: rgba(0, 0, 0, 0.6);
-  transform: scale(1.05);
-}
-
-.flipButton:active {
-  transform: scale(0.95);
-}
-
-.captureIcon {
-  font-size: 1.5rem;
+  background: rgba(0, 0, 0, 0.5);
+  transform: scale(1.1);
 }
 
 /* Countdown Overlay */
@@ -125,66 +129,51 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.3);
-  z-index: 10;
-  backdrop-filter: blur(2px);
+  background: rgba(0, 0, 0, 0.2);
+  z-index: 100;
+  backdrop-filter: blur(4px);
 }
 
 .countdownNumber {
-  font-size: 8rem;
-  font-weight: 800;
+  font-size: 10rem;
+  font-weight: 900;
   color: #fff;
-  text-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-  animation: countdownPulse 0.9s ease-out infinite;
+  text-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+  animation: pop 0.9s cubic-bezier(0.175, 0.885, 0.32, 1.275) infinite;
 }
 
-@keyframes countdownPulse {
-  0% {
-    transform: scale(0.5);
-    opacity: 0;
-  }
-  50% {
-    transform: scale(1.2);
-    opacity: 1;
-  }
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
+@keyframes pop {
+  0% { transform: scale(0.5); opacity: 0; }
+  50% { transform: scale(1.1); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
 }
 
 /* Aspect Ratio Selector */
 .aspectSelector {
   display: flex;
-  gap: 0.35rem;
-  padding: 0.4rem;
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 12px;
-  flex-wrap: nowrap;
-  justify-content: center;
+  gap: 0.5rem;
   width: 100%;
   overflow-x: auto;
-  scrollbar-width: none; /* Hide scrollbar Firefox */
+  padding: 0.5rem;
+  scrollbar-width: none;
+  justify-content: center;
 }
 
-.aspectSelector::-webkit-scrollbar {
-  display: none; /* Hide scrollbar Chrome/Safari */
-}
+.aspectSelector::-webkit-scrollbar { display: none; }
 
 .aspectButton {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.15rem;
-  padding: 0.4rem 0.6rem;
+  gap: 0.25rem;
+  padding: 0.5rem 0.75rem;
   background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  color: #aaa;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  color: #888;
   cursor: pointer;
   transition: all 0.2s ease;
-  flex: 1;
-  min-width: 70px;
+  min-width: 80px;
 }
 
 .aspectButton:hover {
@@ -193,76 +182,30 @@
 }
 
 .aspectButton.aspectActive {
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.3) 0%, rgba(118, 75, 162, 0.3) 100%);
-  border-color: #667eea;
+  background: rgba(129, 140, 248, 0.1);
+  border-color: #818cf8;
   color: #fff;
 }
 
-.aspectIcon {
-  font-size: 1.25rem;
-}
+.aspectIcon { font-size: 1.5rem; }
+.aspectLabel { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; }
 
-.aspectLabel {
-  font-size: 0.65rem;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-/* Crop Overlay */
-.cropOverlay {
+/* Template Guide */
+.templateGuide {
   position: absolute;
   inset: 0;
+  z-index: 15;
+  pointer-events: none;
   display: flex;
   align-items: center;
   justify-content: center;
-  pointer-events: none;
-  z-index: 5;
 }
 
-.cropFrame {
-  border: 3px solid rgba(255, 255, 255, 0.8);
-  border-radius: 8px;
-  box-shadow: 
-    0 0 0 9999px rgba(0, 0, 0, 0.5),
-    inset 0 0 20px rgba(255, 255, 255, 0.1);
-  transition: all 0.3s ease;
-  position: relative; /* Context for silhouette */
-}
-
-/* Silhouette Guide Overlay */
-.silhouetteGuide {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: flex-end; /* anchor to bottom of crop frame */
-  justify-content: center;
-  pointer-events: none;
-  padding-bottom: 5%;
-}
-
-.silhouetteSvg {
-  height: 100%; /* Take up full crop frame height */
+.guideImage {
   width: 100%;
+  height: 100%;
   object-fit: contain;
-  opacity: 0.45; /* Let user see through it */
-  pointer-events: none;
-}
-
-.mirroredSvg {
-  transform: scaleX(-1);
-}
-
-.silhouettePath {
-  fill: none;
-  stroke: rgba(255, 255, 255, 0.8);
-  stroke-width: 4;
-  stroke-dasharray: 10 10;
-}
-
-@keyframes pulseOpacity {
-  0% { opacity: 0.3; }
-  50% { opacity: 0.6; }
-  100% { opacity: 0.3; }
+  opacity: 0.5;
 }
 
 /* Zoom Control */
@@ -272,32 +215,30 @@
   gap: 1rem;
   width: 100%;
   max-width: 400px;
-  padding: 0.75rem 1.25rem;
+  padding: 0.75rem 1.5rem;
   background: rgba(255, 255, 255, 0.05);
-  border-radius: 50px;
   border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 100px;
   margin-top: -0.5rem;
 }
 
 .zoomLabel {
   font-size: 0.8rem;
-  font-weight: 700;
+  font-weight: 800;
+  color: #666;
   text-transform: uppercase;
-  color: #aaa;
-  letter-spacing: 0.05em;
 }
 
 .zoomValue {
   font-size: 0.9rem;
-  font-weight: 600;
+  font-weight: 700;
   color: #fff;
-  min-width: 2.5rem;
+  min-width: 3rem;
 }
 
 .zoomSlider {
   flex: 1;
   -webkit-appearance: none;
-  appearance: none;
   height: 4px;
   background: rgba(255, 255, 255, 0.1);
   border-radius: 2px;
@@ -306,27 +247,10 @@
 
 .zoomSlider::-webkit-slider-thumb {
   -webkit-appearance: none;
-  appearance: none;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   background: #fff;
   border-radius: 50%;
   cursor: pointer;
-  box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
-  transition: transform 0.2s;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
 }
-
-.zoomSlider::-webkit-slider-thumb:hover {
-  transform: scale(1.1);
-}
-
-.zoomSlider::-moz-range-thumb {
-  width: 20px;
-  height: 20px;
-  background: #fff;
-  border: none;
-  border-radius: 50%;
-  cursor: pointer;
-  box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
-}
-
