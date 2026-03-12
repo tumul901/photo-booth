@@ -239,6 +239,7 @@
 .zoomSlider {
   flex: 1;
   -webkit-appearance: none;
+  appearance: none;
   height: 4px;
   background: rgba(255, 255, 255, 0.1);
   border-radius: 2px;
@@ -247,6 +248,7 @@
 
 .zoomSlider::-webkit-slider-thumb {
   -webkit-appearance: none;
+  appearance: none;
   width: 24px;
   height: 24px;
   background: #fff;

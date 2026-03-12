@@ -136,12 +136,12 @@ async def generate_composite(
                 try:
                     landmarks = face_service.detect_landmarks(sticker_image)
                     if landmarks:
-                        print(f"DEBUG: Face detected: {landmarks}", flush=True)
+                        print(f"DEBUG: Face detected: {landmarks} in {time.perf_counter() - t_step:.2f}s", flush=True)
                     else:
-                        print("DEBUG: No face detected in sticker", flush=True)
+                        print(f"DEBUG: No face detected in sticker ({time.perf_counter() - t_step:.2f}s)", flush=True)
                 except Exception as e:
                     print(f"DEBUG: Face detection failed: {e}", flush=True)
-                print(f"PERF:   face:      {time.perf_counter() - t_step:.2f}s", flush=True)
+                print(f"PERF:   face total: {time.perf_counter() - t_step:.2f}s", flush=True)
 
             elif processing_mode == "pre_extracted":
                 # Image is already a transparent PNG from /api/extract
@@ -341,19 +341,25 @@ async def extract_sticker(
     Used for frontend interactive sticker positioning.
     """
     try:
+        t_extract = time.perf_counter()
         photo_bytes = await photo.read()
         
         # 1. Remove background
+        t_step = time.perf_counter()
         sticker_image = await rembg_service.remove_background(photo_bytes)
+        print(f"PERF [extract]: rembg: {time.perf_counter() - t_step:.2f}s", flush=True)
         
         # 2. Crop to alpha bbox (if not full_frame)
+        t_step = time.perf_counter()
         sticker_image = compose_service.crop_to_alpha_bbox(sticker_image, anchor_mode=anchor_mode)
+        print(f"PERF [extract]: crop:  {time.perf_counter() - t_step:.2f}s", flush=True)
         
         # Save to buffer and return
         buf = BytesIO()
         sticker_image.save(buf, format="PNG")
         buf.seek(0)
         
+        print(f"PERF [extract]: TOTAL: {time.perf_counter() - t_extract:.2f}s", flush=True)
         return Response(content=buf.getvalue(), media_type="image/png")
         
     except Exception as e:

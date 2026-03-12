@@ -345,6 +345,8 @@ class ComposeService:
         # 1. Start with background or transparent canvas
         canvas = Image.new("RGBA", (canvas_w, canvas_h), (255, 255, 255, 0))
         
+        t_inner = time.perf_counter()
+        
         # For sticker "background" mode, place template first (behind sticker)
         if processing_mode in ("sticker", "pre_extracted") and template_meta.composite_mode == "background" and template_path and os.path.exists(template_path):
             template = _load_template_image(template_path).copy()
@@ -482,7 +484,10 @@ class ComposeService:
             print(f"DEBUG Compose: Frame mode — placing frame ON TOP with slot cutouts (scaled)", flush=True)
             template = _load_template_image(template_path).copy()
             if template.size != (canvas_w, canvas_h):
-                template = template.resize((canvas_w, canvas_h), Image.Resampling.LANCZOS)
+                t_resize = time.perf_counter()
+                template = template.resize((canvas_w, canvas_h), Image.Resampling.BICUBIC)
+                print(f"PERF:   frame resize:  {time.perf_counter() - t_resize:.2f}s", flush=True)
+            
             
             # Punch transparent holes at slot positions so photo shows through
             mask = template.getchannel("A").copy()
@@ -505,25 +510,28 @@ class ComposeService:
             has_transparency = False
             if template.mode == "RGBA":
                 extrema = template.getextrema()
-                if extrema[3][0] < 255:  # Min alpha is < 255
+                if len(extrema) >= 4 and extrema[3][0] < 255:  # Min alpha is < 255
                     has_transparency = True
             
             if not has_transparency:
-                print("DEBUG Compose: Template has no transparency, converting white to alpha", flush=True)
+                t_mask = time.perf_counter()
+                print("DEBUG Compose: Template has no transparency, converting white to alpha (FAST)", flush=True)
                 template = template.convert("RGBA")
-                data = template.getdata()
-                new_data = []
-                for item in data:
-                    # R, G, B > 240 is considered "white enough" to be transparent
-                    if item[0] > 240 and item[1] > 240 and item[2] > 240:
-                        new_data.append((255, 255, 255, 0))
-                    else:
-                        new_data.append(item)
-                template.putdata(new_data)
+                # Fast way to turn white to alpha using grayscale thresholding
+                # This replaces the slow pure-python pixel iterator
+                gray = template.convert("L")
+                mask = gray.point(lambda x: 0 if x > 240 else 255, mode='1').convert("L")
+                template.putalpha(mask)
+                print(f"PERF:   white→alpha:   {time.perf_counter() - t_mask:.2f}s", flush=True)
                 
-            if template.size != (template_meta.width, template_meta.height):
-                template = template.resize((template_meta.width, template_meta.height), Image.Resampling.BICUBIC)
+            if template.size != (canvas_w, canvas_h):
+                t_resize = time.perf_counter()
+                template = template.resize((canvas_w, canvas_h), Image.Resampling.BICUBIC)
+                print(f"PERF:   templ resize:  {time.perf_counter() - t_resize:.2f}s", flush=True)
+            
+            t_comp = time.perf_counter()
             canvas = Image.alpha_composite(canvas, template)
+            print(f"PERF:   alpha_comp:    {time.perf_counter() - t_comp:.2f}s", flush=True)
              
         return canvas
 
