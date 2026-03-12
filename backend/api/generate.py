@@ -209,31 +209,78 @@ async def generate_composite(
             print(f"DEBUG FRAME: Using scaled canvas {canvas_w}x{canvas_h} (multiplier={res_multiplier:.2f})", flush=True)
             
             # 1. Start with background or transparent canvas
+            # In frame mode, usually we want a white background behind the photo
             canvas = Image.new("RGBA", (canvas_w, canvas_h), (255, 255, 255, 255))
             
+            # Decide on the "target rectangle" for the photo
+            # If no slots, use full canvas. If slots, use the first slot as the "window"
+            target_rect = (0, 0, canvas_w, canvas_h)
+            if template_meta.slots:
+                s = template_meta.slots[0]
+                # Scale slot coordinates to high-res canvas
+                target_rect = (
+                    int(s.x * res_multiplier), 
+                    int(s.y * res_multiplier), 
+                    int(s.width * res_multiplier), 
+                    int(s.height * res_multiplier)
+                )
+
             if processed_stickers:
                 photo_img = processed_stickers[0]["image"]
                 
-                # Scale photo to COVER the entire canvas (no gaps)
-                photo_ratio = photo_img.width / photo_img.height
-                canvas_ratio = canvas_w / canvas_h
-                
-                if photo_ratio > canvas_ratio:
-                    new_h = canvas_h
-                    new_w = int(photo_img.width * (canvas_h / photo_img.height))
+                # If we have user_position, use manual composition logic
+                if user_position:
+                    # Logic similar to Sticker mode but without alpha bounding box
+                    user_scale = user_position.get('scale', 1.0)
+                    user_x = user_position.get('x', 0)
+                    user_y = user_position.get('y', 0)
+                    editor_width = user_position.get('editorWidth', 400)
+                    
+                    sf = (canvas_w / editor_width) if editor_width > 0 else res_multiplier
+                    
+                    # Normalize base size (match frontend 350px normalization if possible, or just use natural aspect)
+                    # For frames, we often want the photo to be roughly "canvas sized" initially
+                    base_w = canvas_w
+                    base_h = int(base_w / (photo_img.width / photo_img.height))
+                    
+                    final_w = int(base_w * user_scale)
+                    final_h = int(base_h * user_scale)
+                    
+                    photo_scaled = photo_img.resize((final_w, final_h), Image.Resampling.LANCZOS)
+                    
+                    # Manual placement
+                    cx = canvas_w / 2
+                    cy = canvas_h / 2
+                    final_cx = cx + (user_x * sf)
+                    final_cy = cy + (user_y * sf)
+                    
+                    paste_x = int(final_cx - (final_w / 2))
+                    paste_y = int(final_cy - (final_h / 2))
+                    canvas.paste(photo_scaled, (paste_x, paste_y))
                 else:
-                    new_w = canvas_w
-                    new_h = int(photo_img.height * (canvas_w / photo_img.width))
-                
-                photo_resized = photo_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-                
-                # Center crop to canvas
-                left = (new_w - canvas_w) // 2
-                top = (new_h - canvas_h) // 2
-                photo_cropped = photo_resized.crop((left, top, left + canvas_w, top + canvas_h))
-                
-                canvas.paste(photo_cropped, (0, 0))
-                print(f"DEBUG FRAME: Photo placed full-canvas ({canvas_w}x{canvas_h})", flush=True)
+                    # Automatic Fitting to target_rect
+                    tx, ty, tw, th = target_rect
+                    
+                    # Use "contain" instead of "cover" to avoid aggressive zooming
+                    # This ensures the whole person is visible within the frame cutout
+                    photo_ratio = photo_img.width / photo_img.height
+                    target_ratio = tw / th
+                    
+                    if photo_ratio > target_ratio:
+                        new_w = tw
+                        new_h = int(tw / photo_ratio)
+                    else:
+                        new_h = th
+                        new_w = int(th * photo_ratio)
+                        
+                    photo_resized = photo_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                    
+                    # Center in target_rect
+                    paste_x = tx + (tw - new_w) // 2
+                    paste_y = ty + (th - new_h) // 2
+                    canvas.paste(photo_resized, (paste_x, paste_y))
+                    
+                print(f"DEBUG FRAME: Photo placed. Done!", flush=True)
             
             # Overlay frame on top — ensure it is resized to match high-res canvas
             if frame.size != (canvas_w, canvas_h):

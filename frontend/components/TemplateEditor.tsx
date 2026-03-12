@@ -390,8 +390,8 @@ export default function TemplateEditor({
 
   // Save configuration
   const handleSave = () => {
-    if (slots.length === 0) {
-      alert('Please draw at least one slot');
+    if (templateType === 'sticker' && slots.length === 0) {
+      alert('Please draw at least one slot for Sticker templates');
       return;
     }
 

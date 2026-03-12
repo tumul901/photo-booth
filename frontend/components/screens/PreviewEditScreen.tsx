@@ -47,6 +47,17 @@ export default function PreviewEditScreen({
   useEffect(() => {
     let active = true;
 
+    // First, we need to know the template type
+    if (!templateConfig) {
+      fetch(`${API_BASE_URL}/api/admin/templates/${selectedTemplate}/config`)
+        .then(res => res.json())
+        .then(data => {
+          if (active) setTemplateConfig(data);
+        })
+        .catch(err => console.error("Failed to load template config early:", err));
+      return;
+    }
+
     async function extract() {
       try {
         setIsExtracting(true);
@@ -54,6 +65,13 @@ export default function PreviewEditScreen({
 
         // Convert base64 to Blob
         const blob = await fetch(rawImage).then((r) => r.blob());
+
+        if (templateConfig?.templateType === 'frame') {
+          // Skip extraction for frames, use natural image directly
+          setExtractedSrc(rawImage);
+          setIsExtracting(false);
+          return;
+        }
 
         const formData = new FormData();
         formData.append('photo', blob, 'photo.jpg');
@@ -89,16 +107,10 @@ export default function PreviewEditScreen({
 
     extract();
     
-    // Also fetch template config to know if we should apply a filter in the editor
-    fetch(`${API_BASE_URL}/api/admin/templates/${selectedTemplate}/config`)
-      .then(res => res.json())
-      .then(data => setTemplateConfig(data))
-      .catch(err => console.error("Failed to load template config:", err));
-
     return () => {
       active = false;
     };
-  }, [rawImage, anchorMode, selectedTemplate]);
+  }, [rawImage, anchorMode, selectedTemplate, templateConfig]);
 
   // Gesture Tracking State
   const pointers = useRef<Map<number, { x: number, y: number }>>(new Map());
