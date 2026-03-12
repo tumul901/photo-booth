@@ -54,6 +54,7 @@ export default function WebcamCapture({
   const [zoom, setZoom] = useState(1);
   const [zoomRange, setZoomRange] = useState({ min: 1, max: 1 });
   const [hasZoom, setHasZoom] = useState(false);
+  const [nativeRatio, setNativeRatio] = useState<number>(4/3); // Default typical webcam ratio
 
   const toggleCamera = useCallback(() => {
     setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
@@ -136,7 +137,11 @@ export default function WebcamCapture({
 
           // Log actual resolution for debugging
           videoRef.current.onloadedmetadata = () => {
-            console.log(`📷 Webcam resolution: ${videoRef.current?.videoWidth}×${videoRef.current?.videoHeight}`);
+            if (videoRef.current) {
+              const { videoWidth, videoHeight } = videoRef.current;
+              console.log(`📷 Webcam resolution: ${videoWidth}×${videoHeight}`);
+              setNativeRatio(videoWidth / videoHeight);
+            }
           };
         }
       } catch (err) {
@@ -251,14 +256,27 @@ export default function WebcamCapture({
 
   // Calculate crop overlay dimensions for preview
   const getCropOverlayStyle = (): React.CSSProperties => {
-    const ratio = getAspectRatioValue(aspectRatio);
+    const targetRatio = getAspectRatioValue(aspectRatio);
+    const containerRatio = nativeRatio;
     
-    if (ratio > 1) {
-      // Landscape - width limited
-      return { aspectRatio: `${ratio}`, width: '100%', maxHeight: '100%' };
+    // We want the crop frame to represent where the canvas.toDataURL will clip
+    // Since the .video is object-fit: contain inside a wrapper of nativeRatio,
+    // they match perfectly. We just need to center the targetRatio inside containerRatio.
+    
+    if (targetRatio > containerRatio) {
+      // Target is wider than sensor (unlikely for portrait, but possible)
+      return { 
+        aspectRatio: `${targetRatio}`, 
+        width: '100%', 
+        height: `${(containerRatio / targetRatio) * 100}%`,
+      };
     } else {
-      // Portrait - height limited
-      return { aspectRatio: `${ratio}`, height: '100%', maxWidth: '100%' };
+      // Target is taller than sensor (standard phone portrait)
+      return { 
+        aspectRatio: `${targetRatio}`, 
+        height: '100%', 
+        width: `${(targetRatio / containerRatio) * 100}%`,
+      };
     }
   };
 
@@ -281,7 +299,7 @@ export default function WebcamCapture({
 
       <div 
         className={styles.videoWrapper}
-        style={{ aspectRatio: `${getAspectRatioValue(aspectRatio)}` }}
+        style={{ aspectRatio: `${nativeRatio}` }}
       >
         {/* Flip Camera Button */}
         {isReady && !error && (
