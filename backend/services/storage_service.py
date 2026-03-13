@@ -19,6 +19,18 @@ import time
 from datetime import datetime
 
 
+def resize_image_for_web(image: Image.Image, max_dim: int = 1440) -> Image.Image:
+    """Cap image dimensions for web display while preserving quality."""
+    w, h = image.size
+    if w <= max_dim and h <= max_dim:
+        return image
+    
+    scale = max_dim / max(w, h)
+    new_w, new_h = int(w * scale), int(h * scale)
+    print(f"INFO: Scaling output {w}x{h} -> {new_w}x{new_h} for transfer speed", flush=True)
+    return image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+
 @dataclass
 class StorageResult:
     """Result from saving an image to storage."""
@@ -114,7 +126,7 @@ class LocalStorageProvider(StorageProvider):
         image: Image.Image,
         filename: Optional[str] = None,
         format: str = "JPEG",
-        quality: int = 95,
+        quality: int = 88,
     ) -> StorageResult:
         """Save image to local filesystem."""
         output_id = filename or f"{uuid.uuid4().hex}"
@@ -128,10 +140,13 @@ class LocalStorageProvider(StorageProvider):
             bg.paste(image, mask=image.split()[3])
             save_image = bg
         
+        # Resize before saving to disk
+        save_image = resize_image_for_web(save_image)
+
         # Save the image to disk
         t = time.perf_counter()
         if format.upper() == "JPEG":
-            save_image.save(filepath, format="JPEG", quality=quality)
+            save_image.save(filepath, format="JPEG", quality=quality, progressive=True)
         elif format.upper() == "WEBP":
             save_image.save(filepath, format="WEBP", quality=quality, method=4)
         else:
@@ -227,7 +242,7 @@ class S3StorageProvider(StorageProvider):
         image: Image.Image,
         filename: Optional[str] = None,
         format: str = "JPEG",
-        quality: int = 95,
+        quality: int = 88,
     ) -> StorageResult:
         """Save image to S3. Encodes immediately, uploads in foreground by default.
         Use save_image_deferred() + upload_deferred() to defer the upload."""
@@ -240,7 +255,7 @@ class S3StorageProvider(StorageProvider):
         image: Image.Image,
         filename: Optional[str] = None,
         format: str = "JPEG",
-        quality: int = 95,
+        quality: int = 88,
     ):
         """Save image to LOCAL DISK first (instant), then upload to S3 in background.
         Returns (StorageResult, upload_coroutine)."""
@@ -256,10 +271,13 @@ class S3StorageProvider(StorageProvider):
             bg.paste(image, mask=image.split()[3])
             save_image = bg
 
+        # Resize before saving to disk
+        save_image = resize_image_for_web(save_image)
+
         # Save to LOCAL DISK first — this is instant and serves the user immediately
         t = time.perf_counter()
         if format.upper() == "JPEG":
-            save_image.save(local_path, format="JPEG", quality=quality)
+            save_image.save(local_path, format="JPEG", quality=quality, progressive=True)
         elif format.upper() == "WEBP":
             save_image.save(local_path, format="WEBP", quality=quality, method=4)
         else:

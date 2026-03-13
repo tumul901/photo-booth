@@ -66,6 +66,16 @@ class FaceService:
         if not self.mp_detector and self.cv_net is None:
             print("⚠️ WARNING: No face detectors available!", flush=True)
     
+    def warm_up(self):
+        """Pre-warm detectors with a dummy image to avoid cold-start lag."""
+        print("INFO: Pre-warming face detectors...", flush=True)
+        dummy = Image.new("RGB", (300, 300), (128, 128, 128))
+        try:
+            self.detect_landmarks(dummy)
+        except:
+            pass
+        print("INFO: Face detector warm-up complete ✅", flush=True)
+    
     def _init_mediapipe(self):
         """Initialize MediaPipe face detector."""
         if not MEDIAPIPE_AVAILABLE:

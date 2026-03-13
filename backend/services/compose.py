@@ -28,6 +28,15 @@ def _load_template_image(path: str) -> Image.Image:
     print(f"INFO: Loading template image into cache: {os.path.basename(path)}", flush=True)
     return Image.open(path).convert("RGBA")
 
+@lru_cache(maxsize=16)
+def _get_resized_template(path: str, width: int, height: int) -> Image.Image:
+    """Load and resize template, caching the result to avoid repeated BICUBIC math."""
+    print(f"INFO: Resizing template cache: {os.path.basename(path)} -> {width}x{height}", flush=True)
+    img = _load_template_image(path)
+    if img.size != (width, height):
+        return img.resize((width, height), Image.Resampling.LANCZOS)
+    return img.copy()
+
 @dataclass
 class SlotMetadata:
     """Metadata for a single template slot."""
@@ -63,6 +72,7 @@ def clear_template_cache():
     """Clear in-memory caches when templates are updated."""
     load_template_metadata.cache_clear()
     _load_template_image.cache_clear()
+    _get_resized_template.cache_clear()
 
 @lru_cache(maxsize=32)
 def load_template_metadata(template_id: str, templates_dir: Optional[str] = None) -> Optional[TemplateMetadata]:
@@ -382,9 +392,7 @@ class ComposeService:
         
         # For sticker "background" mode, place template first (behind sticker)
         if processing_mode in ("sticker", "pre_extracted") and template_meta.composite_mode == "background" and template_path and os.path.exists(template_path):
-            template = _load_template_image(template_path).copy()
-            if template.size != (canvas_w, canvas_h):
-                template = template.resize((canvas_w, canvas_h), Image.Resampling.LANCZOS)
+            template = _get_resized_template(template_path, canvas_w, canvas_h)
             canvas = Image.alpha_composite(canvas, template)
         
         # Sort slots (original slots, not scaled yet)
@@ -517,41 +525,29 @@ class ComposeService:
         # No hole-punching needed — just composite the frame directly on top.
         if processing_mode == "frame" and template_path and os.path.exists(template_path):
             print(f"DEBUG Compose: Frame mode — overlaying frame on top of photo", flush=True)
-            template = _load_template_image(template_path).copy()
-            if template.size != (canvas_w, canvas_h):
-                t_resize = time.perf_counter()
-                template = template.resize((canvas_w, canvas_h), Image.Resampling.BICUBIC)
-                print(f"PERF:   frame resize:  {time.perf_counter() - t_resize:.2f}s", flush=True)
-            
+            template = _get_resized_template(template_path, canvas_w, canvas_h)
             canvas = Image.alpha_composite(canvas, template)
         
         # --- STICKER MODE with overlay: Place template on top ---
         elif processing_mode in ("sticker", "pre_extracted") and template_meta.composite_mode == "overlay" and template_path and os.path.exists(template_path):
-            template = _load_template_image(template_path).copy()
+            template = _get_resized_template(template_path, canvas_w, canvas_h)
             
-            # If template has no transparency (e.g., JPEG or opaque PNG), treat white as transparent
-            # so the sticker underneath can show through
+            # If template has no transparency, treat white as transparent
             has_transparency = False
             if template.mode == "RGBA":
                 extrema = template.getextrema()
-                if len(extrema) >= 4 and extrema[3][0] < 255:  # Min alpha is < 255
+                if len(extrema) >= 4 and extrema[3][0] < 255:
                     has_transparency = True
             
             if not has_transparency:
                 t_mask = time.perf_counter()
                 print("DEBUG Compose: Template has no transparency, converting white to alpha (FAST)", flush=True)
-                template = template.convert("RGBA")
-                # Fast way to turn white to alpha using grayscale thresholding
-                # This replaces the slow pure-python pixel iterator
+                # Important: copy from cache before mutating
+                template = template.copy().convert("RGBA")
                 gray = template.convert("L")
                 mask = gray.point(lambda x: 0 if x > 240 else 255, mode='1').convert("L")
                 template.putalpha(mask)
                 print(f"PERF:   white→alpha:   {time.perf_counter() - t_mask:.2f}s", flush=True)
-                
-            if template.size != (canvas_w, canvas_h):
-                t_resize = time.perf_counter()
-                template = template.resize((canvas_w, canvas_h), Image.Resampling.BICUBIC)
-                print(f"PERF:   templ resize:  {time.perf_counter() - t_resize:.2f}s", flush=True)
             
             t_comp = time.perf_counter()
             canvas = Image.alpha_composite(canvas, template)
