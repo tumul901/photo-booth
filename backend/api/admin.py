@@ -9,7 +9,7 @@ from services.storage_service import storage_service
 from config import settings
 from pathlib import Path
 from pydantic import BaseModel
-from services.compose import clear_template_cache
+import services.compose as compose_service
 
 router = APIRouter()
 
@@ -165,7 +165,7 @@ async def upload_template(
         with open(meta_path, "w") as f:
             json.dump(meta, f, indent=2)
             
-        clear_template_cache()
+        compose_service.clear_template_cache()
         return {"success": True, "template": meta}
         
     except Exception as e:
@@ -200,7 +200,7 @@ async def delete_template(template_id: str):
                 os.remove(image_path)
                 print(f"DEBUG: Deleted template image: {image_path}")
             
-        clear_template_cache()
+        compose_service.clear_template_cache()
         return {"success": True}
         
     except Exception as e:
@@ -312,12 +312,10 @@ async def update_template_config(template_id: str, config: TemplateConfigUpdate)
         with open(meta_path, 'w') as f:
             json.dump(template_json, f, indent=2)
         
-        clear_template_cache()
-        print(f"DEBUG: Saved template config: {template_id}")
-        # Clear caches so the new configuration is picked up immediately
-        clear_template_cache()
-        
-        return {"success": True, "message": "Template saved successfully"}
+        # Unique signature to verify this code version on VPS
+        print(f"DEBUG_V2: Saving config for {template_id}")
+        compose_service.clear_template_cache()
+        return {"success": True, "message": "Template saved successfully (v2)"}
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Save failed: {str(e)}")
