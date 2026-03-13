@@ -5,7 +5,9 @@
   "compositeMode": "overlay",
   "pngUrl": "doritos2.png",
   "anchorMode": "bbox_center",
-  "stickerFilter": "bw",
+  "stickerFilter": "none",
+  "showVisualGuide": false,
+  "allowManualPositioning": false,
   "dimensions": {
     "width": 400,
     "height": 400
@@ -21,8 +23,8 @@
         "targetX": 1403,
         "targetY": 898
       },
-      "desiredFaceRatio": 0.25,
-      "minZoom": 0.5,
+      "desiredFaceRatio": 0.3,
+      "minZoom": 1.0,
       "maxZoom": 2.5,
       "zIndex": 0
     }

@@ -71,51 +71,82 @@ def load_template_metadata(template_id: str, templates_dir: Optional[str] = None
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
         templates_dir = os.path.join(project_root, "templates")
     
+    # Case-insensitive lookup helper
+    def find_file_case_insensitive(directory, target_name):
+        if not os.path.exists(directory):
+            return None
+        target_lower = target_name.lower()
+        for entry in os.listdir(directory):
+            if entry.lower() == target_lower:
+                return os.path.join(directory, entry)
+        return None
+
     # Try multiple potential filenames
-    json_files = [
-        os.path.join(templates_dir, f"{template_id}.json"),
-        os.path.join(templates_dir, os.path.basename(template_id) + ".json"),
-    ]
+    json_path = find_file_case_insensitive(templates_dir, f"{template_id}.json")
+    if not json_path:
+        json_path = find_file_case_insensitive(templates_dir, os.path.basename(template_id) + ".json")
     
-    for json_path in json_files:
-        if os.path.exists(json_path):
-            try:
-                with open(json_path, 'r') as f:
-                    data = json.load(f)
-                
-                slots = []
-                for slot_data in data.get("slots", []):
-                    anchor = slot_data.get("anchorTarget", slot_data.get("anchor", {}))
-                    slots.append(SlotMetadata(
-                        slot_id=slot_data.get("id", slot_data.get("slotId", "main")),
-                        x=slot_data["x"],
-                        y=slot_data["y"],
-                        width=slot_data["width"],
-                        height=slot_data["height"],
-                        anchor_target_x=anchor.get("x", anchor.get("targetX")),
-                        anchor_target_y=anchor.get("y", anchor.get("targetY")),
-                        z_index=slot_data.get("zIndex", 0),
-                        desired_face_ratio=slot_data.get("desiredFaceRatio"),
-                        min_zoom=slot_data.get("minZoom", 0.5),
-                        max_zoom=slot_data.get("maxZoom", 3.0),
-                    ))
-                
-                dimensions = data.get("dimensions", {})
-                return TemplateMetadata(
-                    template_id=data.get("templateId", data.get("id", template_id)),
-                    name=data.get("name", "Unnamed"),
-                    png_path=data.get("png_path", data.get("pngUrl", "")),
-                    slots=slots,
-                    anchor_mode=data.get("anchorMode", "bbox_center"),
-                    width=dimensions.get("width", data.get("width", 1200)),
-                    height=dimensions.get("height", data.get("height", 1600)),
-                    template_type=data.get("templateType", data.get("mode", "sticker")),
-                    composite_mode=data.get("compositeMode", "overlay"),
-                    sticker_filter=data.get("stickerFilter", "none"),
-                )
-            except Exception as e:
-                print(f"Error parse template {json_path}: {e}")
-                continue
+    if json_path and os.path.exists(json_path):
+        try:
+            with open(json_path, 'r') as f:
+                data = json.load(f)
+            
+            slots = []
+            for slot_data in data.get("slots", []):
+                anchor = slot_data.get("anchorTarget", slot_data.get("anchor", {}))
+                slots.append(SlotMetadata(
+                    slot_id=slot_data.get("id", slot_data.get("slotId", "main")),
+                    x=slot_data["x"],
+                    y=slot_data["y"],
+                    width=slot_data["width"],
+                    height=slot_data["height"],
+                    anchor_target_x=anchor.get("x", anchor.get("targetX")),
+                    anchor_target_y=anchor.get("y", anchor.get("targetY")),
+                    z_index=slot_data.get("zIndex", 0),
+                    desired_face_ratio=slot_data.get("desiredFaceRatio"),
+                    min_zoom=slot_data.get("minZoom", 0.5),
+                    max_zoom=slot_data.get("maxZoom", 3.0),
+                ))
+            
+            dimensions = data.get("dimensions", {})
+            w = dimensions.get("width", data.get("width", 1200))
+            h = dimensions.get("height", data.get("height", 1600))
+            
+            # Path to the actual PNG
+            png_url = data.get("png_path", data.get("pngUrl", ""))
+            
+            # Try to resolve png_path case-insensitively if it's just a filename
+            resolved_png_path = find_file_case_insensitive(templates_dir, png_url)
+            if resolved_png_path:
+                png_url = os.path.basename(resolved_png_path)
+            
+            png_path = os.path.join(templates_dir, png_url)
+            
+            # SENSOR: Auto-detect real dimensions if placeholder (400) or missing
+            # This prevents "blank image" errors caused by resolution mismatches
+            if os.path.exists(png_path) and (w <= 400 or h <= 400):
+                try:
+                    with Image.open(png_path) as img:
+                        real_w, real_height = img.size
+                        print(f"DEBUG: Detected real dimensions for {template_id}: {real_w}x{real_height} (Override {w}x{h})", flush=True)
+                        w, h = real_w, real_height
+                except Exception as img_err:
+                    print(f"ERROR: Could not read image dimensions for {png_path}: {img_err}")
+
+            return TemplateMetadata(
+                template_id=data.get("templateId", data.get("id", template_id)),
+                name=data.get("name", "Unnamed"),
+                png_path=png_url,
+                slots=slots,
+                anchor_mode=data.get("anchorMode", "bbox_center"),
+                width=w,
+                height=h,
+                template_type=data.get("templateType", data.get("mode", "sticker")),
+                composite_mode=data.get("compositeMode", "overlay"),
+                sticker_filter=data.get("stickerFilter", "none"),
+            )
+        except Exception as e:
+            print(f"Error parse template {json_path}: {e}")
     return None
 
 class ComposeService:
@@ -343,7 +374,9 @@ class ComposeService:
         print(f"DEBUG Compose: Scaling canvas {template_meta.width}x{template_meta.height} -> {canvas_w}x{canvas_h} (multiplier={res_multiplier:.2f})", flush=True)
         
         # 1. Start with background or transparent canvas
-        canvas = Image.new("RGBA", (canvas_w, canvas_h), (255, 255, 255, 0))
+        # Frame mode usually needs a solid white background behind the photo
+        bg_color = (255, 255, 255, 255) if processing_mode == "frame" else (255, 255, 255, 0)
+        canvas = Image.new("RGBA", (canvas_w, canvas_h), bg_color)
         
         t_inner = time.perf_counter()
         
@@ -479,26 +512,17 @@ class ComposeService:
             canvas.paste(sticker_scaled, (x, y), sticker_scaled)
 
 
-        # --- FRAME MODE: Always place frame ON TOP with holes at slot positions ---
+        # --- FRAME MODE: Overlay frame ON TOP of photo ---
+        # The frame PNG already has transparent cutouts where the photo shows through.
+        # No hole-punching needed — just composite the frame directly on top.
         if processing_mode == "frame" and template_path and os.path.exists(template_path):
-            print(f"DEBUG Compose: Frame mode — placing frame ON TOP with slot cutouts (scaled)", flush=True)
+            print(f"DEBUG Compose: Frame mode — overlaying frame on top of photo", flush=True)
             template = _load_template_image(template_path).copy()
             if template.size != (canvas_w, canvas_h):
                 t_resize = time.perf_counter()
                 template = template.resize((canvas_w, canvas_h), Image.Resampling.BICUBIC)
                 print(f"PERF:   frame resize:  {time.perf_counter() - t_resize:.2f}s", flush=True)
             
-            
-            # Punch transparent holes at slot positions so photo shows through
-            mask = template.getchannel("A").copy()
-            draw = ImageDraw.Draw(mask)
-            for slot in sorted_slots_meta: # Iterate original slots, but scale coordinates for drawing
-                draw.rectangle(
-                    [int(slot.x * res_multiplier), int(slot.y * res_multiplier), 
-                     int((slot.x + slot.width) * res_multiplier), int((slot.y + slot.height) * res_multiplier)],
-                    fill=0  # Fully transparent
-                )
-            template.putalpha(mask)
             canvas = Image.alpha_composite(canvas, template)
         
         # --- STICKER MODE with overlay: Place template on top ---
