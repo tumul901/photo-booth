@@ -9,6 +9,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.generate import router as generate_router
 from api.admin import router as admin_router
+from api.wtm import router as wtm_router
+from api.wtm_admin import router as wtm_admin_router
 from config import settings
 
 
@@ -20,6 +22,11 @@ async def lifespan(app: FastAPI):
     from services.face_service import face_service
     rembg_service.warm_up()
     face_service.warm_up()
+    from services.wtm_config import load_all_configs
+    from pathlib import Path
+    Path(settings.WTM_TEMPLATES_DIR).mkdir(parents=True, exist_ok=True)
+    Path(settings.WTM_CACHE_DIR).mkdir(parents=True, exist_ok=True)
+    load_all_configs()
     yield
     stats_service.flush()
 
@@ -49,6 +56,8 @@ app.add_middleware(
 # Register API routers
 app.include_router(generate_router, prefix="/api", tags=["generate"])
 app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
+app.include_router(wtm_router, prefix="/api/wtm", tags=["wtm"])
+app.include_router(wtm_admin_router, prefix="/api/admin/wtm", tags=["wtm-admin"])
 
 
 @app.get("/")

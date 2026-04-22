@@ -12,10 +12,9 @@ Pipeline:
 import os
 import json
 import time
-from io import BytesIO
 from types import SimpleNamespace
 from PIL import Image, ImageOps, ImageFilter, ImageEnhance
-from typing import Tuple, Optional, Dict, List, Union
+from typing import Tuple, Optional, Dict, List
 from dataclasses import dataclass
 from functools import lru_cache
 import json
@@ -55,6 +54,24 @@ class SlotMetadata:
     max_zoom: float = 3.0
 
 @dataclass
+class MagazineTextConfig:
+    """
+    Configuration for rendering a single dynamic text element (NAME or DESIGNATION)
+    on the magazine canvas using Pillow ImageDraw.
+
+    Coordinates are in the template's native pixel space (matching the dimensions
+    stored in the JSON). They are scaled by res_multiplier at render time.
+    """
+    x: int                      # Left edge of text in template-native pixels
+    y: int                      # Top edge of text in template-native pixels
+    font_size: int              # Font size in template-native pixels (scaled at render)
+    color: str = "#FFFFFF"      # CSS hex color, e.g. "#FFFFFF" or "white"
+    font_path: str = ""         # Absolute path to a .ttf font file; empty = use default
+    max_width: int = 0          # If > 0, text is clamped/wrapped to this width (native px)
+    align: str = "left"         # "left", "center", "right"
+    uppercase: bool = False     # If True, force text to uppercase before drawing
+
+@dataclass
 class TemplateMetadata:
     """Full template configuration."""
     template_id: str
@@ -64,9 +81,15 @@ class TemplateMetadata:
     anchor_mode: str  # face_center, eyes, bbox_center, none
     width: int
     height: int
-    template_type: str = "sticker" # frame, sticker
-    composite_mode: str = "overlay"  # "overlay" = template on top, "background" = template behind sticker
+    template_type: str = "sticker" # frame, sticker, magazine
+    composite_mode: str = "overlay"  # "overlay" = template on top, "background" = template behind sticker, "magazine" = BG→user→FG sandwich
     sticker_filter: str = "none"  # "none", "bw", "sketch"
+    fg_path: str = ""  # Magazine mode: foreground overlay PNG (goes on top of user)
+    fg_offset: Optional[Dict] = None  # Magazine mode: FG overlay position offset {x, y}
+
+    # Magazine mode: dynamic text positions
+    name_text: Optional['MagazineTextConfig'] = None         # Where to draw the person's name
+    designation_text: Optional['MagazineTextConfig'] = None  # Where to draw their designation
 
 def clear_template_cache():
     """Clear in-memory caches when templates are updated."""
@@ -143,10 +166,40 @@ def load_template_metadata(template_id: str, templates_dir: Optional[str] = None
                 except Exception as img_err:
                     print(f"ERROR: Could not read image dimensions for {png_path}: {img_err}")
 
+            # Resolve fg_path the same way as png_path (case-insensitive)
+            raw_fg = data.get("fg_path", "")
+            if raw_fg:
+                resolved_fg = find_file_case_insensitive(templates_dir, raw_fg)
+                if resolved_fg:
+                    raw_fg = os.path.basename(resolved_fg)
+
+            # --- Magazine text config ---
+            def _parse_text_cfg(raw: dict) -> Optional[MagazineTextConfig]:
+                if not raw:
+                    return None
+                return MagazineTextConfig(
+                    x=int(raw.get("x", 0)),
+                    y=int(raw.get("y", 0)),
+                    font_size=int(raw.get("fontSize", 60)),
+                    color=raw.get("color", "#FFFFFF"),
+                    font_path=raw.get("fontPath", ""),
+                    max_width=int(raw.get("maxWidth", 0)),
+                    align=raw.get("align", "left"),
+                    uppercase=bool(raw.get("uppercase", False)),
+                )
+
+            name_text_cfg = _parse_text_cfg(data.get("name_text", {}))
+            designation_text_cfg = _parse_text_cfg(data.get("designation_text", {}))
+
+            raw_fg_offset = data.get("fg_offset")
+            fg_offset = raw_fg_offset if isinstance(raw_fg_offset, dict) else None
+
             return TemplateMetadata(
                 template_id=data.get("templateId", data.get("id", template_id)),
                 name=data.get("name", "Unnamed"),
                 png_path=png_url,
+                fg_path=raw_fg,
+                fg_offset=fg_offset,
                 slots=slots,
                 anchor_mode=data.get("anchorMode", "bbox_center"),
                 width=w,
@@ -154,6 +207,8 @@ def load_template_metadata(template_id: str, templates_dir: Optional[str] = None
                 template_type=data.get("templateType", data.get("mode", "sticker")),
                 composite_mode=data.get("compositeMode", "overlay"),
                 sticker_filter=data.get("stickerFilter", "none"),
+                name_text=name_text_cfg,
+                designation_text=designation_text_cfg,
             )
         except Exception as e:
             print(f"Error parse template {json_path}: {e}")
@@ -192,25 +247,25 @@ class ComposeService:
         """Apply high-contrast B&W or Pencil Sketch filter to sticker."""
         if not filter_type or filter_type == "none":
             return sticker
-            
+
         if sticker.mode != "RGBA":
             sticker = sticker.convert("RGBA")
-            
+
         r, g, b, a = sticker.split()
         rgb_img = Image.merge("RGB", (r, g, b))
-        
+
         if filter_type == "bw":
             gray = ImageOps.grayscale(rgb_img)
             enhancer = ImageEnhance.Contrast(gray)
             gray = enhancer.enhance(1.5)
             rgb_img = gray.convert("RGB")
-            
+
         elif filter_type == "sketch":
             gray = ImageOps.grayscale(rgb_img)
             edges = gray.filter(ImageFilter.FIND_EDGES)
             inv_edges = ImageOps.invert(edges)
             rgb_img = inv_edges.convert("RGB")
-            
+
         r, g, b = rgb_img.split()
         return Image.merge("RGBA", (r, g, b, a))
 
@@ -359,6 +414,105 @@ class ComposeService:
         
         return (slot.x + (slot.width - sticker_w) // 2, slot.y + slot.height - sticker_h)
 
+    def _draw_magazine_text(
+        self,
+        canvas: Image.Image,
+        text: str,
+        cfg: 'MagazineTextConfig',
+        res_multiplier: float,
+    ) -> None:
+        """
+        Draw a single line of text on the canvas in-place using Pillow ImageDraw.
+
+        All native-pixel coordinates in cfg are scaled by res_multiplier so the
+        text renders correctly regardless of the canvas upscaling applied in
+        compose_final.
+
+        Args:
+            canvas       — The RGBA canvas to draw onto (mutated in-place)
+            text         — The string to draw (name or designation)
+            cfg          — MagazineTextConfig loaded from the template JSON
+            res_multiplier — The same multiplier used to scale the canvas in compose_final
+        """
+        from PIL import ImageDraw, ImageFont
+
+        if not text or not text.strip():
+            return
+
+        # Apply uppercase if configured
+        display_text = text.upper() if cfg.uppercase else text
+
+        # Scale coordinates to the upscaled canvas space
+        x = int(cfg.x * res_multiplier)
+        y = int(cfg.y * res_multiplier)
+        font_size = int(cfg.font_size * res_multiplier)
+        max_width = int(cfg.max_width * res_multiplier) if cfg.max_width > 0 else 0
+
+        # Load font
+        font = None
+        if cfg.font_path and os.path.exists(cfg.font_path):
+            try:
+                font = ImageFont.truetype(cfg.font_path, font_size)
+            except Exception as e:
+                print(f"WARNING: Could not load font {cfg.font_path}: {e}. Using default.", flush=True)
+
+        if font is None:
+            # Pillow built-in default — no TTF needed, always available
+            # Note: default font ignores size; this is a fallback only
+            try:
+                # Try to load a common system font as a better fallback
+                for fallback in [
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+                    "C:/Windows/Fonts/arial.ttf",
+                ]:
+                    if os.path.exists(fallback):
+                        font = ImageFont.truetype(fallback, font_size)
+                        break
+            except Exception:
+                pass
+
+        if font is None:
+            font = ImageFont.load_default()
+
+        # Parse colour (supports "#RRGGBB" and named colours like "white")
+        try:
+            from PIL import ImageColor
+            rgb = ImageColor.getrgb(cfg.color)
+            colour_rgba = rgb + (255,) if len(rgb) == 3 else rgb
+        except Exception:
+            colour_rgba = (255, 255, 255, 255)
+
+        draw = ImageDraw.Draw(canvas)
+
+        # If max_width is set, truncate text to fit (single line only — no wrapping)
+        if max_width > 0:
+            # Linear pruning: trim one char at a time until it fits
+            truncated = False
+            while len(display_text) > 1:
+                bbox = draw.textbbox((0, 0), display_text, font=font)
+                text_w = bbox[2] - bbox[0]
+                if text_w <= max_width:
+                    break
+                display_text = display_text[:-1]
+                truncated = True
+            if truncated and len(display_text) > 3:
+                display_text = display_text[:-1] + '…'  # Add ellipsis when truncated
+
+        # Alignment offset
+        if cfg.align in ("center", "right"):
+            bbox = draw.textbbox((0, 0), display_text, font=font)
+            text_w = bbox[2] - bbox[0]
+            if cfg.align == "center":
+                ref_w = max_width if max_width > 0 else (canvas.width - x)
+                x = x + (ref_w - text_w) // 2
+            else:  # right
+                ref_w = max_width if max_width > 0 else (canvas.width - x)
+                x = x + ref_w - text_w
+
+        draw.text((x, y), display_text, font=font, fill=colour_rgba)
+        print(f"DEBUG Magazine Text: drew '{display_text}' at ({x},{y}) size={font_size}", flush=True)
+
     def compose_final(
         self,
         template_path: Optional[str],
@@ -366,6 +520,9 @@ class ComposeService:
         template_meta: TemplateMetadata,
         processing_mode: str = "sticker",
         user_position: Optional[Dict] = None,
+        fg_template_path: Optional[str] = None,  # Magazine mode: foreground overlay
+        magazine_name: str = "",           # Magazine mode: person's name
+        magazine_designation: str = "",    # Magazine mode: person's designation
     ) -> Image.Image:
         """
         Main entry point for final sticker-style composition.
@@ -388,12 +545,16 @@ class ComposeService:
         bg_color = (255, 255, 255, 255) if processing_mode == "frame" else (255, 255, 255, 0)
         canvas = Image.new("RGBA", (canvas_w, canvas_h), bg_color)
         
-        t_inner = time.perf_counter()
-        
         # For sticker "background" mode, place template first (behind sticker)
-        if processing_mode in ("sticker", "pre_extracted") and template_meta.composite_mode == "background" and template_path and os.path.exists(template_path):
+        # Magazine mode also starts with a BG layer behind the user cutout
+        _bg_check = processing_mode in ("sticker", "pre_extracted") and template_meta.composite_mode in ("background", "magazine")
+        print(f"DEBUG Compose: background check: mode={processing_mode}, composite_mode={template_meta.composite_mode}, path={template_path}, exists={os.path.exists(template_path) if template_path else 'N/A'}, will_composite={_bg_check and bool(template_path) and (os.path.exists(template_path) if template_path else False)}", flush=True)
+        if _bg_check and template_path and os.path.exists(template_path):
             template = _get_resized_template(template_path, canvas_w, canvas_h)
+            print(f"DEBUG Compose: Template loaded: size={template.size}, mode={template.mode}, extrema={template.getextrema()}", flush=True)
             canvas = Image.alpha_composite(canvas, template)
+            # Verify canvas now has template content
+            print(f"DEBUG Compose: Canvas after template composite: extrema={canvas.getextrema()}", flush=True)
         
         # Sort slots (original slots, not scaled yet)
         sorted_slots_meta = sorted(template_meta.slots, key=lambda s: s.z_index)
@@ -403,7 +564,6 @@ class ComposeService:
         # Prepare stickers with their corresponding slots
         # The `stickers` list might not be sorted by z_index, so we need to match them.
         # Assuming `stickers` are provided in the order they should fill `sorted_slots_meta`.
-        processed_stickers = []
         for i, sticker_data_input in enumerate(stickers):
             if i >= len(sorted_slots_meta):
                 break # No more slots for this sticker
@@ -417,8 +577,10 @@ class ComposeService:
                 height=int(original_slot.height * res_multiplier),
                 x=int(original_slot.x * res_multiplier),
                 y=int(original_slot.y * res_multiplier),
-                anchor_target_x=original_slot.anchor_target_x, # These are ratios/absolute, not scaled yet
-                anchor_target_y=original_slot.anchor_target_y,
+                # Ratios (<=1.0) pass through as-is; resolve_anchor_to_pixels multiplies by the already-scaled slot dimension.
+                # Absolute pixels (>1.0) must be scaled by res_multiplier to match the upscaled canvas.
+                anchor_target_x=(original_slot.anchor_target_x * res_multiplier if original_slot.anchor_target_x is not None and original_slot.anchor_target_x > 1.0 else original_slot.anchor_target_x),
+                anchor_target_y=(original_slot.anchor_target_y * res_multiplier if original_slot.anchor_target_y is not None and original_slot.anchor_target_y > 1.0 else original_slot.anchor_target_y),
                 z_index=original_slot.z_index,
                 desired_face_ratio=original_slot.desired_face_ratio,
                 min_zoom=original_slot.min_zoom,
@@ -516,9 +678,60 @@ class ComposeService:
                     landmarks_scaled # Use scaled landmarks
                 )
 
-            # Paste photo onto canvas
-            canvas.paste(sticker_scaled, (x, y), sticker_scaled)
+            # Paste photo onto canvas, clipped to slot bounds
+            # (Critical for WTM where photo_slot != full canvas. No-op when slot == canvas.)
+            print(f"DEBUG Compose: Sticker placement: sticker_scaled={sticker_scaled.size}, paste_at=({x},{y}), slot=({s_slot.x},{s_slot.y},{s_slot.width},{s_slot.height}), canvas={canvas.size}", flush=True)
+            sx, sy = s_slot.x, s_slot.y
+            sw, sh = s_slot.width, s_slot.height
+            clip_l = max(0, sx - x)
+            clip_t = max(0, sy - y)
+            clip_r = min(sticker_scaled.width, sx + sw - x)
+            clip_b = min(sticker_scaled.height, sy + sh - y)
+            print(f"DEBUG Compose: Clip bounds: l={clip_l}, t={clip_t}, r={clip_r}, b={clip_b}", flush=True)
+            if clip_r > clip_l and clip_b > clip_t:
+                clipped = sticker_scaled.crop((clip_l, clip_t, clip_r, clip_b))
+                print(f"DEBUG Compose: Clipped sticker: size={clipped.size}, pasting at ({x + clip_l},{y + clip_t})", flush=True)
+                canvas.paste(clipped, (x + clip_l, y + clip_t), clipped)
+            else:
+                print(f"DEBUG Compose: WARNING — clip bounds invalid, pasting unclipped", flush=True)
+                canvas.paste(sticker_scaled, (x, y), sticker_scaled)
 
+
+        # --- MAGAZINE MODE: FG overlay on top of user cutout ---
+        # BG was already placed behind the sticker in the _bg_check above.
+        # Now place the foreground (title, text, design elements) on top.
+        if template_meta.composite_mode == "magazine":
+            # Step 1 — composite FG PNG over the user cutout
+            if fg_template_path and os.path.exists(fg_template_path):
+                # Load FG at its NATIVE dimensions (the FG may be intentionally smaller
+                # than the BG to accommodate an fg_offset without edge clipping).
+                # Only scale by res_multiplier for high-res canvas upscaling — do NOT
+                # force-resize to (canvas_w, canvas_h), or the admin-configured
+                # margin will be destroyed and the right/bottom will be clipped.
+                fg_native = _load_template_image(fg_template_path)
+                if res_multiplier != 1.0:
+                    fg = _get_resized_template(
+                        fg_template_path,
+                        int(fg_native.width * res_multiplier),
+                        int(fg_native.height * res_multiplier),
+                    )
+                else:
+                    fg = fg_native
+
+                fg_off = template_meta.fg_offset or {}
+                ox = int(fg_off.get('x', 0) * res_multiplier)
+                oy = int(fg_off.get('y', 0) * res_multiplier)
+
+                # Always use a layer: FG is generally smaller than canvas, so we can't
+                # alpha_composite directly (PIL requires matching sizes).
+                fg_layer = Image.new('RGBA', (canvas_w, canvas_h), (0, 0, 0, 0))
+                fg_layer.paste(fg, (ox, oy), fg)
+                canvas = Image.alpha_composite(canvas, fg_layer)
+                print(f"DEBUG Compose: Magazine FG overlay applied: {os.path.basename(fg_template_path)} fg_size={fg.size} offset=({ox},{oy}) canvas=({canvas_w},{canvas_h})", flush=True)
+            else:
+                print(f"DEBUG Compose: Magazine mode but no FG path or file missing: {fg_template_path}", flush=True)
+
+            # Text drawing is handled below (shared with all composite modes)
 
         # --- FRAME MODE: Overlay frame ON TOP of photo ---
         # The frame PNG already has transparent cutouts where the photo shows through.
@@ -538,7 +751,7 @@ class ComposeService:
                 extrema = template.getextrema()
                 if len(extrema) >= 4 and extrema[3][0] < 255:
                     has_transparency = True
-            
+                    
             if not has_transparency:
                 t_mask = time.perf_counter()
                 print("DEBUG Compose: Template has no transparency, converting white to alpha (FAST)", flush=True)
@@ -552,7 +765,29 @@ class ComposeService:
             t_comp = time.perf_counter()
             canvas = Image.alpha_composite(canvas, template)
             print(f"PERF:   alpha_comp:    {time.perf_counter() - t_comp:.2f}s", flush=True)
-             
+
+        # --- Text overlays: fire for any composite mode (magazine, WTM background, sticker) ---
+        if magazine_name and template_meta.name_text:
+            self._draw_magazine_text(
+                canvas=canvas,
+                text=magazine_name,
+                cfg=template_meta.name_text,
+                res_multiplier=res_multiplier,
+            )
+        elif magazine_name:
+            print("DEBUG Compose: magazine_name provided but name_text config missing in template JSON", flush=True)
+
+        if magazine_designation and template_meta.designation_text:
+            self._draw_magazine_text(
+                canvas=canvas,
+                text=magazine_designation,
+                cfg=template_meta.designation_text,
+                res_multiplier=res_multiplier,
+            )
+        elif magazine_designation:
+            print("DEBUG Compose: magazine_designation provided but designation_text config missing in template JSON", flush=True)
+
         return canvas
+
 
 compose_service = ComposeService()

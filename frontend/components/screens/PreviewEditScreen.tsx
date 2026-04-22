@@ -19,6 +19,8 @@ interface PreviewEditScreenProps {
   selectedTemplate: string;
   rawImage: string; // Base64 from capture
   anchorMode?: string;
+  templateImageUrl?: string;  // Custom background image (e.g. WTM composed PNG)
+  skipConfigFetch?: boolean;  // Skip admin config fetch for WTM mode
   onComplete: (extractedBase64: string, position: { x: number; y: number; scale: number; editorWidth: number; stickerWidth?: number }) => void;
   onCancel: () => void;
 }
@@ -27,6 +29,8 @@ export default function PreviewEditScreen({
   selectedTemplate,
   rawImage,
   anchorMode = 'full_frame',
+  templateImageUrl,
+  skipConfigFetch,
   onComplete,
   onCancel,
 }: PreviewEditScreenProps) {
@@ -49,6 +53,11 @@ export default function PreviewEditScreen({
 
     // First, we need to know the template type
     if (!templateConfig) {
+      if (skipConfigFetch) {
+        // WTM mode: no admin config to fetch, use stub config immediately
+        setTemplateConfig({ templateType: 'sticker' });
+        return;
+      }
       fetch(`${API_BASE_URL}/api/admin/templates/${selectedTemplate}/config`)
         .then(res => res.json())
         .then(data => {
@@ -209,7 +218,7 @@ export default function PreviewEditScreen({
     <div className={styles.container}>
       <div className={styles.header}>
         <button className={styles.backButton} onClick={onCancel} disabled={isExtracting}>
-          ← Back to Camera
+          ←<span className={styles.backText}> Back to Camera</span>
         </button>
         <button className={styles.doneButton} onClick={handleDone} disabled={isExtracting || !!error}>
           ✨ Generate Photo
@@ -233,10 +242,10 @@ export default function PreviewEditScreen({
         <div className={styles.canvasContainer} ref={containerRef}>
           {/* Template Background */}
           {selectedTemplate && (
-            <img 
+            <img
               ref={templateRef}
-              src={`${API_BASE_URL}/api/admin/templates/${selectedTemplate}/image`} 
-              className={styles.bgTemplate} 
+              src={templateImageUrl || `${API_BASE_URL}/api/admin/templates/${selectedTemplate}/image`}
+              className={styles.bgTemplate}
               alt="Background Template"
               draggable={false}
             />

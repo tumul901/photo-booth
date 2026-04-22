@@ -6,13 +6,15 @@
   margin: 0 auto;
   min-height: 60vh;
   gap: 1rem;
+  padding: var(--space-md);
+  box-sizing: border-box;
 }
 
 .header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1rem 0;
+  padding: 0.5rem 0;
 }
 
 .backButton {
@@ -22,6 +24,14 @@
   font-size: 1rem;
   cursor: pointer;
   transition: color 0.2s;
+  padding: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.backText {
+  display: inline;
 }
 
 .backButton:hover:not(:disabled) {
@@ -168,4 +178,21 @@
   font-size: 0.8rem;
   color: #888;
   margin: 0;
+}
+
+@media (max-width: 600px) {
+  .container {
+    padding: var(--space-sm);
+  }
+  .backButton {
+    padding: 0.5rem 0.75rem;
+    font-size: 1.1rem;
+  }
+  .backText {
+    display: none;
+  }
+  .doneButton {
+    padding: 0.6rem 1.25rem;
+    font-size: 0.95rem;
+  }
 }

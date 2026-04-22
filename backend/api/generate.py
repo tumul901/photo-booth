@@ -56,6 +56,8 @@ async def generate_composite(
     slot_assignments: Optional[str] = Form(None),
     processing_mode: str = Form("sticker"),  # "sticker", "frame", "pre_extracted"
     photo_position: Optional[str] = Form(None),  # JSON: {"x", "y", "scale", "editorWidth"}
+    magazine_name: str = Form(""),           # NEW — person's name for magazine mode
+    magazine_designation: str = Form(""),    # NEW — person's designation for magazine mode
 ):
     """
     Generate a composited photo from uploaded image(s) and a template.
@@ -184,14 +186,18 @@ async def generate_composite(
         # Compose final image
         t_step = time.perf_counter()
         template_path = os.path.join(TEMPLATES_DIR, template_meta.png_path) if template_meta.png_path else None
-        
-        # All modes (sticker, frame, pre_extracted) now use the same robust composition service
+        fg_template_path = os.path.join(TEMPLATES_DIR, template_meta.fg_path) if template_meta.fg_path else None
+
+        # All modes (sticker, frame, pre_extracted, magazine) now use the same robust composition service
         final_image = compose_service.compose_final(
             template_path=template_path,
             stickers=processed_stickers,
             template_meta=template_meta,
             processing_mode=processing_mode,
             user_position=user_position,
+            fg_template_path=fg_template_path,
+            magazine_name=magazine_name,            # NEW
+            magazine_designation=magazine_designation,  # NEW
         )
         print(f"PERF:   compose:   {time.perf_counter() - t_step:.2f}s", flush=True)
         
@@ -340,6 +346,7 @@ async def list_templates():
                             "templateId": meta.template_id,
                             "name": meta.name,
                             "templateType": meta.template_type,
+                            "compositeMode": meta.composite_mode,
                             "slotCount": len(meta.slots),
                             "anchorMode": meta.anchor_mode,
                         })

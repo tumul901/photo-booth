@@ -30,11 +30,19 @@
   font-size: 0.85rem;
   cursor: pointer;
   transition: all var(--transition-base);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
 }
 
 .backButton:hover {
   background: rgba(255, 255, 255, 0.1);
   color: var(--color-text-primary);
+}
+
+.backText {
+  display: inline;
 }
 
 .headerSpacer {
@@ -77,9 +85,9 @@
 .captureWrapper {
   flex: 1;
   display: flex;
-  justify-content: center;
-  align-items: center;
-  overflow: hidden;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: var(--space-md);
 }
 
@@ -134,7 +142,15 @@
 
   .backButton {
     font-size: 0.8rem;
-    padding: var(--space-xs) var(--space-sm);
+    min-width: 0;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border-radius: 50%;
+  }
+
+  .backText {
+    display: none;
   }
 
   .toggleBtn {

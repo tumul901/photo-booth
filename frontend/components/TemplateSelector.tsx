@@ -10,18 +10,21 @@
 import { useState, useEffect, useMemo } from 'react';
 import styles from './TemplateSelector.module.css';
 
+import type { WTMTemplateListItem } from '@/types/wtm';
+
 interface Template {
   templateId: string;
   name: string;
-  templateType: 'frame' | 'sticker';
+  templateType: 'frame' | 'sticker' | 'word_template' | 'magazine';
+  compositeMode: string;
   slotCount: number;
   anchorMode: string;
 }
 
 interface TemplateSelectorProps {
   selectedTemplate: string;
-  onSelect: (templateId: string) => void;
-  processingMode?: 'frame' | 'sticker';
+  onSelect: (templateId: string, compositeMode: string) => void;
+  processingMode?: 'frame' | 'sticker' | 'word_template' | 'magazine';
 }
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -37,9 +40,24 @@ export default function TemplateSelector({
   useEffect(() => {
     const fetchTemplates = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/api/templates`);
-        const data = await response.json();
-        setTemplates(data.templates || []);
+        if (processingMode === 'word_template') {
+          const response = await fetch(`${API_BASE_URL}/api/admin/wtm/templates`);
+          const data: WTMTemplateListItem[] = await response.json();
+          setTemplates(
+            data.map((t) => ({
+              templateId: t.template_id,
+              name: t.name,
+              templateType: 'word_template' as const,
+              compositeMode: 'none',
+              slotCount: t.slot_count,
+              anchorMode: 'none',
+            })),
+          );
+        } else {
+          const response = await fetch(`${API_BASE_URL}/api/templates`);
+          const data = await response.json();
+          setTemplates(data.templates || []);
+        }
       } catch (error) {
         console.error('Failed to fetch templates:', error);
       } finally {
@@ -48,10 +66,13 @@ export default function TemplateSelector({
     };
 
     fetchTemplates();
-  }, []);
+  }, [processingMode]);
 
-  // Filter templates based on processing mode
   const filteredTemplates = useMemo(() => {
+    if (processingMode === 'magazine') {
+      return templates.filter(t => t.templateType === 'magazine');
+    }
+    // Sticker mode shows only regular sticker templates (magazine has its own mode now)
     return templates.filter(t => t.templateType === processingMode);
   }, [templates, processingMode]);
 
@@ -67,7 +88,7 @@ export default function TemplateSelector({
     return (
       <div className={styles.container}>
         <p className={styles.empty}>
-          {loading ? 'Loading...' : `No ${processingMode === 'frame' ? 'frames' : 'sticker templates'} available`}
+          {loading ? 'Loading...' : `No ${processingMode === 'frame' ? 'frames' : processingMode === 'sticker' ? 'sticker templates' : 'word templates'} available`}
         </p>
       </div>
     );
@@ -82,12 +103,16 @@ export default function TemplateSelector({
             className={`${styles.templateCard} ${
               selectedTemplate === template.templateId ? styles.selected : ''
             }`}
-            onClick={() => onSelect(template.templateId)}
+            onClick={() => onSelect(template.templateId, template.compositeMode)}
           >
             {/* Frame Preview Image */}
             <div className={styles.previewWrapper}>
               <img
-                src={`${API_BASE_URL}/api/templates/${template.templateId}/image`}
+                src={
+                  template.templateType === 'word_template'
+                    ? `${API_BASE_URL}/api/admin/wtm/templates/${template.templateId}/image`
+                    : `${API_BASE_URL}/api/templates/${template.templateId}/image`
+                }
                 alt={template.name}
                 className={styles.previewImage}
                 onError={(e) => {

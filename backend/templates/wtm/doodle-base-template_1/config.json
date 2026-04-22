@@ -1,0 +1,126 @@
+{
+  "template_id": "doodle-base-template_1",
+  "name": "doodle-base-template",
+  "mode": "word_template",
+  "base_image": "base.png",
+  "dimensions": {
+    "width": 1687,
+    "height": 3000
+  },
+  "slots": [
+    {
+      "id": "slot_0",
+      "order": 0,
+      "x": 674,
+      "y": 825,
+      "width": 291,
+      "height": 114,
+      "rotation": 0.0
+    },
+    {
+      "id": "slot_1",
+      "order": 1,
+      "x": 11,
+      "y": 1320,
+      "width": 500,
+      "height": 173,
+      "rotation": 0.0
+    },
+    {
+      "id": "slot_2",
+      "order": 2,
+      "x": 1106,
+      "y": 1702,
+      "width": 545,
+      "height": 163,
+      "rotation": 0.0
+    },
+    {
+      "id": "slot_3",
+      "order": 3,
+      "x": 47,
+      "y": 1930,
+      "width": 550,
+      "height": 148,
+      "rotation": -37.0
+    },
+    {
+      "id": "slot_4",
+      "order": 4,
+      "x": 1025,
+      "y": 1064,
+      "width": 628,
+      "height": 205,
+      "rotation": -13.0
+    }
+  ],
+  "words": [
+    {
+      "id": "champion",
+      "label": "champion",
+      "svg_filename": "champion.svg"
+    },
+    {
+      "id": "limitless",
+      "label": "limitless",
+      "svg_filename": "limitless.svg"
+    },
+    {
+      "id": "momentum",
+      "label": "momentum",
+      "svg_filename": "momentum.svg"
+    },
+    {
+      "id": "unbeatable",
+      "label": "unbeatable",
+      "svg_filename": "unbeatable.svg"
+    },
+    {
+      "id": "unforgettable",
+      "label": "unforgettable",
+      "svg_filename": "unforgettable.svg"
+    },
+    {
+      "id": "unstoppable",
+      "label": "unstoppable",
+      "svg_filename": "unstoppable.svg"
+    }
+  ],
+  "bundles": [],
+  "max_selections": 6,
+  "created_at": "2026-04-04T11:33:58.528558+00:00",
+  "updated_at": "2026-04-22T09:25:56.627845+00:00",
+  "photo_slot": {
+    "x": 429,
+    "y": 850,
+    "width": 834,
+    "height": 1314,
+    "anchor_x": 0.5,
+    "anchor_y": 0.35,
+    "anchor_mode": "face_center",
+    "desired_face_ratio": 0.35,
+    "min_zoom": 0.5,
+    "max_zoom": 3.0,
+    "sticker_filter": "none"
+  },
+  "name_text": {
+    "x": 572,
+    "y": 2371,
+    "font_size": 60,
+    "color": "#050505",
+    "font_name": "FORMADJRDISPLAY-REGULAR",
+    "max_width": 0,
+    "align": "left",
+    "uppercase": false
+  },
+  "designation_text": {
+    "x": 581,
+    "y": 2466,
+    "font_size": 30,
+    "color": "#0d0c0c",
+    "font_name": "FORMADJRMICRO-REGULAR",
+    "max_width": 0,
+    "align": "left",
+    "uppercase": false
+  }
+}

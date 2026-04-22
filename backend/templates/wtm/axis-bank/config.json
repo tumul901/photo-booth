@@ -1,0 +1,102 @@
+{
+  "template_id": "axis-bank",
+  "name": "axis-bank",
+  "mode": "word_template",
+  "base_image": "base.png",
+  "dimensions": {
+    "width": 1081,
+    "height": 1920
+  },
+  "slots": [
+    {
+      "id": "slot_0",
+      "order": 0,
+      "x": 352,
+      "y": 91,
+      "width": 345,
+      "height": 84,
+      "rotation": 0.0
+    },
+    {
+      "id": "slot_1",
+      "order": 1,
+      "x": 17,
+      "y": 667,
+      "width": 271,
+      "height": 72,
+      "rotation": -6.0
+    },
+    {
+      "id": "slot_2",
+      "order": 2,
+      "x": 764,
+      "y": 490,
+      "width": 300,
+      "height": 73,
+      "rotation": 4.0
+    },
+    {
+      "id": "slot_3",
+      "order": 3,
+      "x": 19,
+      "y": 1118,
+      "width": 295,
+      "height": 80,
+      "rotation": -22.0
+    },
+    {
+      "id": "slot_4",
+      "order": 4,
+      "x": 768,
+      "y": 991,
+      "width": 298,
+      "height": 73,
+      "rotation": 4.0
+    }
+  ],
+  "words": [
+    {
+      "id": "boldness",
+      "label": "boldness",
+      "svg_filename": "boldness.png"
+    },
+    {
+      "id": "courage",
+      "label": "courage",
+      "svg_filename": "courage.png"
+    },
+    {
+      "id": "dreamer",
+      "label": "dreamer",
+      "svg_filename": "dreamer.png"
+    },
+    {
+      "id": "fearless",
+      "label": "fearless",
+      "svg_filename": "fearless.png"
+    },
+    {
+      "id": "freeflow",
+      "label": "freeflow",
+      "svg_filename": "freeflow.png"
+    }
+  ],
+  "bundles": [],
+  "max_selections": 6,
+  "allow_manual_positioning": true,
+  "created_at": "2026-04-22T11:59:15.317204+00:00",
+  "updated_at": "2026-04-22T12:17:50.718411+00:00",
+  "photo_slot": {
+    "x": 271,
+    "y": 313,
+    "width": 560,
+    "height": 989,
+    "anchor_x": 0.5,
+    "anchor_y": 0.35,
+    "anchor_mode": "none",
+    "desired_face_ratio": 0.35,
+    "min_zoom": 0.5,
+    "max_zoom": 3.0,
+    "sticker_filter": "none"
+  }
+}

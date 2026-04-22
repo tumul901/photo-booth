@@ -142,14 +142,22 @@ async def upload_template(
                 "rotation": 0
             })
             
+        if mode == "frame":
+            composite_mode = "overlay"
+        elif mode == "magazine":
+            composite_mode = "magazine"
+        else:
+            composite_mode = "background"
+
         meta = {
             "templateId": template_id,
             "name": name,
             "templateType": mode,
-            "compositeMode": "overlay" if mode == "frame" else "background",
+            "compositeMode": composite_mode,
             "pngUrl": image_filename,
             "png_path": image_filename,
-            "anchorMode": "bbox_center",
+            "fg_path": "",  # Set later via /fg endpoint
+            "anchorMode": "face_center" if mode == "magazine" else "bbox_center",
             "dimensions": {
                 "width": 1200,
                 "height": 1600
@@ -220,12 +228,28 @@ class SlotConfig(BaseModel):
     anchorX: float  # 0-1 relative position within slot
     anchorY: float
 
+class TextConfig(BaseModel):
+    """
+    Position and style for a single dynamic text element (name or designation)
+    rendered by Pillow at photo generation time.
+    All pixel values are in the template's native coordinate space.
+    """
+    x: int = 0
+    y: int = 0
+    fontSize: int = 60         # Maps to MagazineTextConfig.font_size
+    color: str = "#FFFFFF"
+    fontPath: str = ""         # Absolute server path to TTF; empty = system default
+    maxWidth: int = 0          # 0 = no limit
+    align: str = "left"        # "left" | "center" | "right"
+    uppercase: bool = False
+
 class TemplateConfigUpdate(BaseModel):
     templateId: str
     name: str
-    templateType: str  # 'frame' or 'sticker'
-    compositeMode: str  # 'background' or 'overlay'
+    templateType: str  # 'frame', 'sticker', or 'magazine'
+    compositeMode: str  # 'background', 'overlay', or 'magazine'
     pngUrl: str
+    fg_path: str = ""  # Magazine foreground overlay filename
     anchorMode: str  # 'face_center', 'eyes', 'none'
     dimensions: dict  # {width, height}
     slots: List[SlotConfig]
@@ -235,6 +259,9 @@ class TemplateConfigUpdate(BaseModel):
     stickerFilter: str = "none"
     showVisualGuide: bool = False
     allowManualPositioning: bool = False
+    name_text: Optional[TextConfig] = None        # NEW — magazine name text position
+    designation_text: Optional[TextConfig] = None  # NEW — magazine designation text position
+    fg_offset: Optional[dict] = None               # NEW — magazine FG overlay position offset {x, y}
 
 
 @router.put("/templates/{template_id}/config")
@@ -270,6 +297,10 @@ async def update_template_config(template_id: str, config: TemplateConfigUpdate)
         original_png_url = config.pngUrl  # Fallback to what frontend sent
     
     try:
+        # Preserve existing fg_path if frontend didn't send one
+        existing_fg_path = existing_meta.get("fg_path", "")
+        fg_path_to_save = config.fg_path if config.fg_path else existing_fg_path
+
         # Build the complete JSON config
         template_json = {
             "templateId": template_id,
@@ -277,6 +308,8 @@ async def update_template_config(template_id: str, config: TemplateConfigUpdate)
             "templateType": config.templateType,
             "compositeMode": config.compositeMode,
             "pngUrl": original_png_url,
+            "png_path": original_png_url,
+            "fg_path": fg_path_to_save,
             "anchorMode": config.anchorMode,
             "stickerFilter": config.stickerFilter,
             "showVisualGuide": config.showVisualGuide,
@@ -305,7 +338,11 @@ async def update_template_config(template_id: str, config: TemplateConfigUpdate)
                 "category": "custom",
                 "tags": [],
                 "author": "Admin"
-            }
+            },
+            # Magazine text overlay config (only written if provided)
+            "name_text": config.name_text.model_dump() if config.name_text else existing_meta.get("name_text", {}),
+            "designation_text": config.designation_text.model_dump() if config.designation_text else existing_meta.get("designation_text", {}),
+            "fg_offset": config.fg_offset if config.fg_offset is not None else existing_meta.get("fg_offset", {"x": 0, "y": 0}),
         }
         
         # Write to file
@@ -403,6 +440,64 @@ async def list_gallery(limit: int = Query(50, ge=1, le=200)):
         return items
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to list gallery: {str(e)}")
+
+
+# --- Magazine: Foreground Image Upload & Serve ---
+
+def _find_template_meta_path(template_id: str):
+    """Return (meta_dict, meta_path) for a template, or (None, None)."""
+    for filename in os.listdir(TEMPLATES_DIR):
+        if not filename.endswith(".json"):
+            continue
+        try:
+            path = os.path.join(TEMPLATES_DIR, filename)
+            with open(path, "r") as f:
+                meta = json.load(f)
+            if meta.get("templateId") == template_id or meta.get("id") == template_id:
+                return meta, path
+        except Exception:
+            continue
+    return None, None
+
+
+@router.post("/templates/{template_id}/fg")
+async def upload_fg_image(template_id: str, file: UploadFile = File(...)):
+    """Upload the foreground overlay image for a magazine template."""
+    meta, meta_path = _find_template_meta_path(template_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    file_ext = os.path.splitext(file.filename or "fg.png")[1] or ".png"
+    fg_filename = f"{template_id}_fg{file_ext}"
+    fg_path = os.path.join(TEMPLATES_DIR, fg_filename)
+
+    with open(fg_path, "wb") as buf:
+        shutil.copyfileobj(file.file, buf)
+
+    meta["fg_path"] = fg_filename
+    with open(meta_path, "w") as f:
+        json.dump(meta, f, indent=2)
+
+    compose_service.clear_template_cache()
+    return {"success": True, "fg_path": fg_filename}
+
+
+@router.get("/templates/{template_id}/fg-image")
+async def get_fg_image(template_id: str):
+    """Serve the foreground overlay image for a magazine template."""
+    meta, _ = _find_template_meta_path(template_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    fg_filename = meta.get("fg_path", "")
+    if not fg_filename:
+        raise HTTPException(status_code=404, detail="No foreground image set for this template")
+
+    fg_path = os.path.join(TEMPLATES_DIR, fg_filename)
+    if not os.path.exists(fg_path):
+        raise HTTPException(status_code=404, detail="Foreground image file not found")
+
+    return FileResponse(fg_path)
 
 
 @router.delete("/gallery/{output_id}")

@@ -20,6 +20,7 @@ interface CaptureScreenProps {
   onBack: () => void;
   onError: (msg: string) => void;
   isProcessing: boolean;
+  processingMode?: 'frame' | 'sticker' | 'word_template' | 'magazine';
 }
 
 export default function CaptureScreen({
@@ -28,6 +29,7 @@ export default function CaptureScreen({
   onBack,
   onError,
   isProcessing,
+  processingMode,
 }: CaptureScreenProps) {
   const [captureMode, setCaptureMode] = useState<CaptureMode>('webcam');
 
@@ -36,7 +38,7 @@ export default function CaptureScreen({
       {/* Header with back and mode toggle */}
       <div className={styles.header}>
         <button className={styles.backButton} onClick={onBack}>
-          ← Back
+          ←<span className={styles.backText}> Back</span>
         </button>
 
         <div className={styles.modeToggle}>
@@ -65,6 +67,8 @@ export default function CaptureScreen({
             onCapture={onCapture}
             onError={onError}
             mirrored={true}
+            isProcessing={isProcessing}
+            processingMode={processingMode}
           />
         ) : (
           <ImageUpload

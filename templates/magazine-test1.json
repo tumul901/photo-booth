@@ -1,0 +1,63 @@
+{
+  "templateId": "magazine-test1",
+  "name": "magazine-test1",
+  "templateType": "magazine",
+  "compositeMode": "magazine",
+  "pngUrl": "magazine-test1.png",
+  "png_path": "magazine-test1.png",
+  "fg_path": "magazine-test1_fg.png",
+  "anchorMode": "face_center",
+  "stickerFilter": "none",
+  "showVisualGuide": false,
+  "allowManualPositioning": true,
+  "dimensions": {
+    "width": 1080,
+    "height": 1500
+  },
+  "slots": [
+    {
+      "slotId": "slot1",
+      "x": 162,
+      "y": 390,
+      "width": 910,
+      "height": 1104,
+      "anchor": {
+        "targetX": 455,
+        "targetY": 386
+      },
+      "desiredFaceRatio": 0.25,
+      "minZoom": 0.5,
+      "maxZoom": 2.5,
+      "zIndex": 0
+    }
+  ],
+  "metadata": {
+    "category": "custom",
+    "tags": [],
+    "author": "Admin"
+  },
+  "name_text": {
+    "x": 304,
+    "y": 1294,
+    "fontSize": 50,
+    "color": "#FFFFFF",
+    "fontPath": "",
+    "maxWidth": 840,
+    "align": "left",
+    "uppercase": true
+  },
+  "designation_text": {
+    "x": 304,
+    "y": 1375,
+    "fontSize": 35,
+    "color": "#079f06",
+    "fontPath": "",
+    "maxWidth": 840,
+    "align": "left",
+    "uppercase": false
+  },
+  "fg_offset": {
+    "x": 33,
+    "y": 30
+  }
+}

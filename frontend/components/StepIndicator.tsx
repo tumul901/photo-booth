@@ -9,18 +9,39 @@
 
 import styles from './StepIndicator.module.css';
 
-const STEPS = [
+const STEPS_DEFAULT = [
   { label: 'Mode', icon: '🎨' },
   { label: 'Template', icon: '🖼️' },
   { label: 'Capture', icon: '📷' },
   { label: 'Result', icon: '✨' },
 ];
 
+const STEPS_WTM = [
+  { label: 'Mode', icon: '🎨' },
+  { label: 'Template', icon: '🖼️' },
+  { label: 'Words', icon: '🔤' },
+  { label: 'Capture', icon: '📷' },
+  { label: 'Result', icon: '✨' },
+];
+
+const STEPS_MAGAZINE = [
+  { label: 'Mode', icon: '🎨' },
+  { label: 'Template', icon: '🖼️' },
+  { label: 'Details', icon: '📝' },
+  { label: 'Capture', icon: '📷' },
+  { label: 'Result', icon: '✨' },
+];
+
 interface StepIndicatorProps {
   currentStep: number; // 1-based
+  processingMode?: 'frame' | 'sticker' | 'word_template' | 'magazine';
 }
 
-export default function StepIndicator({ currentStep }: StepIndicatorProps) {
+export default function StepIndicator({ currentStep, processingMode }: StepIndicatorProps) {
+  let STEPS = STEPS_DEFAULT;
+  if (processingMode === 'word_template') STEPS = STEPS_WTM;
+  if (processingMode === 'magazine') STEPS = STEPS_MAGAZINE;
+
   return (
     <div className={styles.container}>
       {STEPS.map((step, index) => {

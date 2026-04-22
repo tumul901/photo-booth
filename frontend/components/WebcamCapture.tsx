@@ -32,6 +32,8 @@ interface WebcamCaptureProps {
   onCapture: (imageData: string) => void;
   onError?: (error: string) => void;
   mirrored?: boolean;
+  isProcessing?: boolean;
+  processingMode?: 'frame' | 'sticker' | 'word_template' | 'magazine';
 }
 
 export default function WebcamCapture({
@@ -39,6 +41,8 @@ export default function WebcamCapture({
   onCapture,
   onError,
   mirrored = true,
+  isProcessing = false,
+  processingMode,
 }: WebcamCaptureProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -65,9 +69,9 @@ export default function WebcamCapture({
     return w / h;
   }, []);
 
-  // Fetch template visual guide settings
+  // Fetch template visual guide settings (regular frame/sticker templates only)
   useEffect(() => {
-    if (!selectedTemplate) {
+    if (!selectedTemplate || processingMode === 'word_template') {
       setShowGuide(false);
       return;
     }
@@ -80,7 +84,7 @@ export default function WebcamCapture({
         }
       })
       .catch(err => console.error("Template config error:", err));
-  }, [selectedTemplate]);
+  }, [selectedTemplate, processingMode]);
 
   // Main Camera Initialization Logic
   useEffect(() => {
@@ -154,6 +158,14 @@ export default function WebcamCapture({
       .catch(err => console.error("Zoom apply error:", err));
   }, [zoom, stream, hasZoom]);
 
+  // Stop camera when processing starts — frees GPU/battery while loader spins
+  useEffect(() => {
+    if (isProcessing && stream) {
+      stream.getTracks().forEach(t => t.stop());
+      if (videoRef.current) videoRef.current.srcObject = null;
+    }
+  }, [isProcessing, stream]);
+
   // Final capture cleanup
   useEffect(() => {
     return () => stream?.getTracks().forEach(t => t.stop());
@@ -203,7 +215,7 @@ export default function WebcamCapture({
 
     ctx.drawImage(video, sX, sY, sW, sH, 0, 0, sW, sH);
 
-    onCapture(canvas.toDataURL('image/png'));
+    onCapture(canvas.toDataURL('image/jpeg', 0.92));
   }, [mirrored, onCapture, aspectRatio, facingMode, getAspectRatioValue]);
 
   const startCountdown = useCallback(() => setCountdown(3), []);
@@ -271,7 +283,11 @@ export default function WebcamCapture({
         {selectedTemplate && showGuide && isReady && (
           <div className={styles.templateGuide}>
             <img 
-              src={`${API_BASE_URL}/api/admin/templates/${selectedTemplate}/image`} 
+              src={
+                processingMode === 'word_template'
+                  ? `${API_BASE_URL}/api/admin/wtm/templates/${selectedTemplate}/image`
+                  : `${API_BASE_URL}/api/admin/templates/${selectedTemplate}/image`
+              }
               alt="Guide" 
               className={`${styles.guideImage} ${mirrored && facingMode === 'user' ? styles.mirrored : ''}`} 
             />

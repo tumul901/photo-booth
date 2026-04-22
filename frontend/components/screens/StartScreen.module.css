@@ -18,7 +18,7 @@
   flex-direction: column;
   display: flex;
   width: 100%;
-  max-width: 700px;
+  max-width: 1100px;
   padding: var(--space-md);
 }
 
@@ -39,76 +39,80 @@
   -webkit-background-clip: text;
   background-clip: text;
   margin: 0;
-  font-size: 3rem;
+  font-size: 3.5rem;
   font-weight: 800;
 }
 
 .subtitle {
   color: var(--color-text-secondary);
   letter-spacing: 1px;
-  font-size: 1.1rem;
+  font-size: 1.2rem;
   font-weight: 400;
   margin-bottom: var(--space-md);
 }
 
 /* Mode Selection Cards */
 .modeCards {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
   gap: var(--space-lg);
   width: 100%;
-  justify-content: center;
+  justify-items: center;
 }
 
 .modeCard {
-  flex: 1;
-  max-width: 280px;
+  width: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--space-xs);
-  padding: var(--space-lg);
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  padding: var(--space-xl) var(--space-md);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: var(--radius-xl);
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
   color: var(--color-text-primary);
   text-align: center;
 }
 
 .modeCard:hover {
-  transform: translateY(-6px);
-  border-color: var(--color-accent-primary);
-  box-shadow: 0 12px 40px rgba(102, 126, 234, 0.25), 0 0 0 1px rgba(102, 126, 234, 0.2);
-  background: rgba(30, 30, 55, 0.8);
+  transform: translateY(-8px);
+  border-color: rgba(102, 126, 234, 0.5);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), 0 0 20px rgba(102, 126, 234, 0.2);
+  background: rgba(255, 255, 255, 0.07);
 }
 
 .modeCard:active {
-  transform: translateY(-2px) scale(0.98);
+  transform: translateY(-2px) scale(0.97);
 }
 
 .modeIcon {
   font-size: 3.5rem;
   line-height: 1;
   margin-bottom: var(--space-xs);
+  filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.1));
 }
 
 .modeTitle {
-  font-size: 1.2rem;
+  font-size: 1.25rem;
   font-weight: 700;
+  margin-bottom: 4px;
 }
 
 .modeDesc {
   font-size: 0.85rem;
   color: var(--color-text-secondary);
-  line-height: 1.5;
+  line-height: 1.4;
+  opacity: 0.8;
 }
 
 .bgGlow {
   z-index: 1;
   pointer-events: none;
-  background: radial-gradient(circle, rgba(102, 126, 234, 0.05) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(118, 75, 162, 0.15) 0%, transparent 70%);
   width: 150vw;
   height: 150vw;
   position: absolute;
@@ -117,24 +121,66 @@
   transform: translate(-50%, -50%);
 }
 
-/* Responsive */
-@media (max-width: 600px) {
-  .title {
-    font-size: 2.5rem;
+/* Tablet / Large Mobile (2x2 Grid) */
+@media (max-width: 900px) {
+  .content {
+    max-width: 650px;
   }
 
   .modeCards {
-    flex-direction: column;
-    align-items: center;
+    grid-template-columns: repeat(2, 1fr);
     gap: var(--space-md);
   }
 
+  .title {
+    font-size: 3rem;
+  }
+}
+
+/* Mobile (Compact 2x2 Grid) */
+@media (max-width: 600px) {
+  .title {
+    font-size: 2.2rem;
+  }
+
+  .subtitle {
+    font-size: 1rem;
+    margin-bottom: var(--space-sm);
+  }
+
+  .modeCards {
+    gap: var(--space-sm);
+  }
+
   .modeCard {
-    max-width: 100%;
-    padding: var(--space-lg) var(--space-md);
+    padding: var(--space-lg) var(--space-sm);
+    border-radius: var(--radius-lg);
   }
 
   .modeIcon {
     font-size: 2.5rem;
+  }
+
+  .modeTitle {
+    font-size: 1rem;
+  }
+
+  .modeDesc {
+    font-size: 0.75rem;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+}
+
+/* Narrow screens - potentially hide desc or further tighten */
+@media (max-width: 380px) {
+  .modeDesc {
+    display: none;
+  }
+  
+  .modeCard {
+    padding: var(--space-md) var(--space-xs);
   }
 }

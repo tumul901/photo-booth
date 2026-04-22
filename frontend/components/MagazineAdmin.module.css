@@ -1,0 +1,278 @@
+.container {
+  padding: 1.5rem 0;
+}
+
+.sectionTitle {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #e2e8f0;
+  margin: 0 0 0.4rem 0;
+}
+
+.subtitle {
+  font-size: 0.85rem;
+  color: #94a3b8;
+  margin: 0 0 1.5rem 0;
+  line-height: 1.5;
+}
+
+/* Create card */
+.createCard {
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 12px;
+  padding: 1.2rem 1.4rem;
+  margin-bottom: 2rem;
+}
+
+.createTitle {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #a5b4fc;
+  margin: 0 0 1rem 0;
+}
+
+.createRow {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.fieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  flex: 1;
+  min-width: 180px;
+}
+
+.fieldLabel {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.input {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  border-radius: 8px;
+  color: #e2e8f0;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.input:focus {
+  border-color: #6366f1;
+}
+
+.fileInput {
+  font-size: 0.82rem;
+  color: #94a3b8;
+  cursor: pointer;
+}
+
+.createButton {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 0.55rem 1.2rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+  white-space: nowrap;
+}
+
+.createButton:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.createButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Loading / empty */
+.loading,
+.empty {
+  text-align: center;
+  color: #64748b;
+  padding: 3rem 0;
+  font-size: 0.9rem;
+}
+
+/* Template grid */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1.25rem;
+}
+
+.card {
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Preview stack (BG + FG composited) */
+.previewStack {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  background: #0f172a;
+  overflow: hidden;
+}
+
+.previewBg,
+.previewFg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.previewFg {
+  /* The FG PNG is already transparent; just overlay it */
+}
+
+.layerBadge {
+  position: absolute;
+  bottom: 0.5rem;
+  left: 0.5rem;
+  background: rgba(0, 0, 0, 0.7);
+  color: #e2e8f0;
+  font-size: 0.7rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+}
+
+/* Card body */
+.cardBody {
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  flex: 1;
+}
+
+.templateName {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.templateId {
+  font-size: 0.7rem;
+  color: #64748b;
+  font-family: monospace;
+  margin-top: -0.5rem;
+}
+
+/* FG upload section */
+.fgSection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  background: rgba(99, 102, 241, 0.06);
+  border: 1px dashed rgba(99, 102, 241, 0.25);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+}
+
+.fgLabel {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #a5b4fc;
+}
+
+.fgRow {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.fileInputSm {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  flex: 1;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.uploadFgButton {
+  background: #6366f1;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.2s;
+}
+
+.uploadFgButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.uploadFgButton:hover:not(:disabled) {
+  opacity: 0.8;
+}
+
+.fgFilename {
+  font-size: 0.7rem;
+  color: #64748b;
+  font-family: monospace;
+  word-break: break-all;
+}
+
+/* Actions */
+.actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: auto;
+}
+
+.configureButton {
+  flex: 1;
+  background: rgba(99, 102, 241, 0.15);
+  color: #a5b4fc;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 8px;
+  padding: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.configureButton:hover {
+  background: rgba(99, 102, 241, 0.28);
+}
+
+.deleteButton {
+  background: rgba(239, 68, 68, 0.1);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.deleteButton:hover {
+  background: rgba(239, 68, 68, 0.22);
+}

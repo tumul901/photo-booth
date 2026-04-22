@@ -1,0 +1,272 @@
+{
+  "_readme": "Single source of truth for all WTM data shapes. Use field names exactly as defined here across config files, Pydantic models, and TypeScript interfaces. WTM uses snake_case. Existing frame/sticker templates use camelCase — never mix them.",
+
+  "wtm_config_json": {
+    "_file_location": "/templates/wtm/{template_id}/config.json",
+    "_description": "One config.json per WTM template. template_id matches parent directory name.",
+    "template_id":    { "type": "string", "pattern": "^[a-zA-Z0-9_-]+$", "required": true, "note": "Must match parent directory name" },
+    "name":           { "type": "string", "minLength": 1, "maxLength": 100, "required": true },
+    "mode":           { "type": "string", "enum": ["word_template"], "required": true },
+    "base_image":     { "type": "string", "required": true, "note": "Filename only e.g. base.png. File must exist at /templates/wtm/{template_id}/base.png. PNG only." },
+    "dimensions": {
+      "type": "object", "required": true,
+      "width":  { "type": "integer", "minimum": 1, "required": true, "note": "Must match actual base_image pixel width" },
+      "height": { "type": "integer", "minimum": 1, "required": true, "note": "Must match actual base_image pixel height" }
+    },
+    "slots": {
+      "type": "array", "required": true, "minItems": 1, "maxItems": 6,
+      "note": "Ordered array. slot.order determines which word fills which slot.",
+      "item_shape": {
+        "id":     { "type": "string", "pattern": "^[a-zA-Z0-9_]+$", "required": true, "note": "Convention: slot_0, slot_1, slot_2..." },
+        "order":  { "type": "integer", "minimum": 0, "required": true, "note": "0-based. Unique. No gaps. [0,1,2] valid. [0,1,3] invalid." },
+        "x":      { "type": "integer", "minimum": 0, "required": true, "note": "Left edge in original image pixels. x + width <= dimensions.width." },
+        "y":      { "type": "integer", "minimum": 0, "required": true, "note": "Top edge in original image pixels. y + height <= dimensions.height." },
+        "width":  { "type": "integer", "minimum": 50, "required": true, "note": "Minimum 50px — matches existing TemplateEditor.tsx threshold (width > 50 && height > 50)" },
+        "height": { "type": "integer", "minimum": 50, "required": true, "note": "Minimum 50px — matches existing TemplateEditor.tsx threshold" }
+      }
+    },
+    "words": {
+      "type": "array", "required": true, "minItems": 0, "maxItems": 20,
+      "note": "Word IDs must be unique within the template.",
+      "item_shape": {
+        "id":           { "type": "string", "pattern": "^[a-z0-9-]+$", "required": true, "note": "Lowercase, hyphens allowed. Unique within template." },
+        "label":        { "type": "string", "minLength": 1, "maxLength": 30, "required": true, "note": "Display text shown in guest UI e.g. 'Champion'" },
+        "svg_filename": { "type": "string", "required": true, "note": "Must end in .svg. File must exist at /templates/wtm/{template_id}/words/{svg_filename}." }
+      }
+    },
+    "bundles": {
+      "type": "array", "required": false, "default": [],
+      "item_shape": {
+        "id":    { "type": "string", "required": true },
+        "label": { "type": "string", "required": true, "note": "e.g. 'Champion Pack'" },
+        "words": { "type": "array", "items": "string", "maxItems": 6, "required": true, "note": "Array of word IDs. All must exist in template words array." }
+      }
+    },
+    "max_selections": { "type": "integer", "enum": [6], "required": true },
+    "created_at":     { "type": "string", "format": "ISO8601", "required": true },
+    "updated_at":     { "type": "string", "format": "ISO8601", "required": true }
+  },
+
+  "wtm_config_example": {
+    "template_id": "summit_2024",
+    "name": "Summit 2024 Doodle Frame",
+    "mode": "word_template",
+    "base_image": "base.png",
+    "dimensions": { "width": 1080, "height": 1080 },
+    "slots": [
+      { "id": "slot_0", "order": 0, "x": 80,  "y": 40,  "width": 260, "height": 80 },
+      { "id": "slot_1", "order": 1, "x": 740, "y": 40,  "width": 260, "height": 80 },
+      { "id": "slot_2", "order": 2, "x": 80,  "y": 960, "width": 260, "height": 80 },
+      { "id": "slot_3", "order": 3, "x": 740, "y": 960, "width": 260, "height": 80 },
+      { "id": "slot_4", "order": 4, "x": 20,  "y": 490, "width": 80,  "height": 100 },
+      { "id": "slot_5", "order": 5, "x": 980, "y": 490, "width": 80,  "height": 100 }
+    ],
+    "words": [
+      { "id": "limitless",   "label": "Limitless",   "svg_filename": "limitless.svg" },
+      { "id": "champion",    "label": "Champion",    "svg_filename": "champion.svg" },
+      { "id": "unstoppable", "label": "Unstoppable", "svg_filename": "unstoppable.svg" },
+      { "id": "fearless",    "label": "Fearless",    "svg_filename": "fearless.svg" },
+      { "id": "visionary",   "label": "Visionary",   "svg_filename": "visionary.svg" },
+      { "id": "bold",        "label": "Bold",        "svg_filename": "bold.svg" }
+    ],
+    "bundles": [
+      { "id": "warrior_pack", "label": "Warrior Pack", "words": ["limitless", "champion", "unstoppable", "fearless", "bold", "visionary"] }
+    ],
+    "max_selections": 6,
+    "created_at": "2024-01-15T09:00:00Z",
+    "updated_at": "2024-01-15T14:30:00Z"
+  },
+
+  "pydantic_models": {
+    "_file": "/backend/schemas/wtm_schemas.py",
+
+    "ComposeRequest": {
+      "template_id":    { "type": "str", "regex": "^[a-zA-Z0-9_-]+$" },
+      "selected_words": {
+        "type": "List[str]", "min_items": 1, "max_items": 6,
+        "validators": [
+          "deduplicate_and_sort: sorted(list(set(v))) — must run before any other validation",
+          "word_id_format: each item must match ^[a-z0-9-]+$"
+        ]
+      }
+    },
+    "ComposeResponse": {
+      "template_path":   "str — absolute path to composed PNG",
+      "cache_hit":       "bool",
+      "compose_time_ms": "Optional[int] — None on cache hit"
+    },
+    "WordItem": {
+      "id":       "str",
+      "label":    "str",
+      "svg_path": "str — server-side path, for admin debugging only. Frontend ignores it."
+    },
+    "BundleItem": {
+      "id":    "str",
+      "label": "str",
+      "words": "List[str] — word IDs"
+    },
+    "WordsResponse": {
+      "template_id":    "str",
+      "words":          "List[WordItem]",
+      "bundles":        "List[BundleItem]",
+      "max_selections": "int = 6",
+      "slot_count":     "int"
+    },
+    "WTMError": {
+      "error_code": "str — e.g. INVALID_TEMPLATE",
+      "message":    "str",
+      "detail":     "Optional[str] — dev mode only"
+    },
+    "SlotDefinition": {
+      "id":     "str",
+      "order":  "int",
+      "x":      "int",
+      "y":      "int",
+      "width":  "int",
+      "height": "int"
+    },
+    "SaveSlotsRequest": {
+      "slots": "List[SlotDefinition]"
+    },
+    "BundleDefinition": {
+      "id":    "str",
+      "label": "str",
+      "words": "List[str]"
+    },
+    "SaveBundlesRequest": {
+      "bundles": "List[BundleDefinition]"
+    },
+    "WTMTemplateListItem": {
+      "template_id": "str",
+      "name":        "str",
+      "slot_count":  "int",
+      "word_count":  "int",
+      "created_at":  "str"
+    }
+  },
+
+  "typescript_interfaces": {
+    "_file": "/frontend/types/wtm.ts",
+    "_note": "svg_path is omitted from WordItem — frontend never needs server file paths.",
+
+    "WordItem": {
+      "id":    "string",
+      "label": "string"
+    },
+    "BundleItem": {
+      "id":    "string",
+      "label": "string",
+      "words": "string[]"
+    },
+    "WordsPayload": {
+      "template_id":    "string",
+      "words":          "WordItem[]",
+      "bundles":        "BundleItem[]",
+      "max_selections": "number",
+      "slot_count":     "number"
+    },
+    "ComposePayload": {
+      "template_id":    "string",
+      "selected_words": "string[] — frontend sends unsorted. Backend always sorts."
+    },
+    "ComposeResult": {
+      "template_path":   "string",
+      "cache_hit":       "boolean",
+      "compose_time_ms": "number | undefined"
+    },
+    "SlotDefinition": {
+      "id":     "string",
+      "order":  "number",
+      "x":      "number",
+      "y":      "number",
+      "width":  "number",
+      "height": "number"
+    },
+    "WTMWord": {
+      "_note": "Used in admin panel only",
+      "id":           "string",
+      "label":        "string",
+      "svg_filename": "string"
+    },
+    "WTMBundle": {
+      "_note": "Used in admin panel only",
+      "id":    "string",
+      "label": "string",
+      "words": "string[]"
+    },
+    "WTMTemplateConfig": {
+      "_note": "Admin panel only — full config shape",
+      "template_id":    "string",
+      "name":           "string",
+      "mode":           "'word_template'",
+      "base_image":     "string",
+      "dimensions":     "{ width: number; height: number }",
+      "slots":          "SlotDefinition[]",
+      "words":          "WTMWord[]",
+      "bundles":        "WTMBundle[]",
+      "max_selections": "number",
+      "created_at":     "string",
+      "updated_at":     "string"
+    },
+    "WTMTemplateListItem": {
+      "template_id": "string",
+      "name":        "string",
+      "slot_count":  "number",
+      "word_count":  "number",
+      "created_at":  "string"
+    }
+  },
+
+  "validation_rules": {
+    "_enforced_in": "wtm_config.py on startup AND wtm_admin.py on every save. Both must enforce identical rules.",
+    "template": [
+      "template_id matches ^[a-zA-Z0-9_-]+$ and matches directory name",
+      "mode equals exactly 'word_template'",
+      "base_image file exists at /templates/wtm/{template_id}/base.png, PNG only",
+      "dimensions.width and .height > 0 and match actual image pixel dimensions (check with PIL)",
+      "slots array has 1–6 items",
+      "words array has 0–20 items with unique IDs"
+    ],
+    "slot": [
+      "id matches ^[a-zA-Z0-9_]+$, unique within template",
+      "order is 0-based, unique, NO GAPS — sorted orders must equal [0,1,...,n-1]",
+      "x >= 0 AND x + width <= dimensions.width",
+      "y >= 0 AND y + height <= dimensions.height",
+      "width >= 50 AND height >= 50 — matches TemplateEditor.tsx threshold exactly"
+    ],
+    "word": [
+      "id matches ^[a-z0-9-]+$, unique within template",
+      "label 1–30 characters",
+      "svg_filename ends in .svg, file exists at /templates/wtm/{template_id}/words/{svg_filename}"
+    ],
+    "bundle": [
+      "all word IDs in bundle.words exist in template.words",
+      "bundle.words length <= 6"
+    ],
+    "startup_behaviour": "Invalid configs are logged and skipped. App does not crash. get_config() raises 400 for invalid or missing templates."
+  },
+
+  "slot_order_contract": {
+    "rule": "selected_words sorted alphabetically server-side always. Slot order=0 gets alphabetically-first word.",
+    "fewer_words_than_slots": "Allowed. Empty slots left transparent.",
+    "more_words_than_slots": "Rejected with 400 SLOT_COUNT_MISMATCH before compositing.",
+    "example": {
+      "selected_words_received": ["unstoppable", "champion", "limitless"],
+      "after_server_sort":       ["champion", "limitless", "unstoppable"],
+      "slot_0_gets": "champion",
+      "slot_1_gets": "limitless",
+      "slot_2_gets": "unstoppable"
+    }
+  },
+
+  "error_codes": {
+    "INVALID_TEMPLATE":    "template_id not found or failed validation",
+    "WORD_NOT_FOUND":      "one or more word IDs not in template — response includes invalid_ids list",
+    "TOO_MANY_WORDS":      "selected_words length > 6",
+    "TOO_FEW_WORDS":       "selected_words is empty",
+    "SLOT_COUNT_MISMATCH": "selected_words count > slot count in config",
+    "COMPOSE_FAILED":      "internal compositing error or timeout",
+    "VALIDATION_ERROR":    "admin save request failed validation — response includes detail",
+    "INVALID_FILE":        "uploaded file is wrong type or too large"
+  }
+}

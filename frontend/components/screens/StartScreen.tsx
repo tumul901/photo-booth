@@ -12,7 +12,7 @@ import Image from 'next/image';
 import styles from './StartScreen.module.css';
 
 interface ModeSelectScreenProps {
-  onSelectMode: (mode: 'frame' | 'sticker') => void;
+  onSelectMode: (mode: 'frame' | 'sticker' | 'word_template' | 'magazine') => void;
 }
 
 export default function ModeSelectScreen({ onSelectMode }: ModeSelectScreenProps) {
@@ -52,6 +52,28 @@ export default function ModeSelectScreen({ onSelectMode }: ModeSelectScreenProps
             <span className={styles.modeTitle}>Remove Background</span>
             <span className={styles.modeDesc}>
               Cut out your background and place onto a template
+            </span>
+          </button>
+
+          <button
+            className={styles.modeCard}
+            onClick={() => onSelectMode('word_template')}
+          >
+            <span className={styles.modeIcon}>🔤</span>
+            <span className={styles.modeTitle}>Word Template</span>
+            <span className={styles.modeDesc}>
+              Choose words that appear on your doodle template
+            </span>
+          </button>
+
+          <button
+            className={styles.modeCard}
+            onClick={() => onSelectMode('magazine')}
+          >
+            <span className={styles.modeIcon}>📰</span>
+            <span className={styles.modeTitle}>Magazine Cover</span>
+            <span className={styles.modeDesc}>
+              Become the cover star of your own magazine
             </span>
           </button>
         </div>

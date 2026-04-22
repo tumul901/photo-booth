@@ -33,6 +33,8 @@ class Settings(BaseSettings):
 
     # --- Paths ---
     OUTPUTS_DIR: str = "outputs"
+    WTM_TEMPLATES_DIR: str = "templates/wtm"
+    WTM_CACHE_DIR: str = "templates/wtm_cache"
 
 
 

@@ -11,6 +11,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Install WTM dependencies
+RUN apt-get update && apt-get install -y \
+    libcairo2-dev \
+    libpango1.0-dev \
+    libgdk-pixbuf2.0-dev \
+    libffi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy and install Python dependencies
 COPY requirements.txt .
 # Install all deps; mediapipe may fail on ARM64 — that's OK, face service has fallback

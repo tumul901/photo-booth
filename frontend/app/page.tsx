@@ -17,6 +17,8 @@ import TemplateScreen from '../components/screens/TemplateScreen';
 import CaptureScreen from '../components/screens/CaptureScreen';
 import PreviewEditScreen from '../components/screens/PreviewEditScreen';
 import ResultScreen from '../components/screens/ResultScreen';
+import WordSelectionStep from '../components/WordSelectionStep';
+import MagazineNameScreen from '../components/screens/MagazineNameScreen';
 import styles from './page.module.css';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -88,7 +90,7 @@ interface ResultData {
   shareUrl: string;
 }
 
-type ProcessingMode = 'frame' | 'sticker';
+type ProcessingMode = 'frame' | 'sticker' | 'word_template' | 'magazine';
 
 // ─── Main Component ──────────────────────────────────────────────────
 
@@ -98,6 +100,13 @@ export default function BoothPage() {
   const [processingMode, setProcessingMode] = useSessionState<ProcessingMode>('processingMode', 'frame');
   const [selectedTemplate, setSelectedTemplate] = useSessionState<string>('selectedTemplate', '');
   const [result, setResult] = useSessionState<ResultData | null>('result', null);
+  const [selectedWords, setSelectedWords] = useSessionState<string[]>('selectedWords', []);
+  const [composedTemplatePath, setComposedTemplatePath] = useSessionState<string | null>('composedTemplatePath', null);
+  const [selectedTemplateMode, setSelectedTemplateMode] = useSessionState<string>('selectedTemplateMode', '');
+  const [magazineName, setMagazineName] = useSessionState<string>('magazineName', '');
+  const [magazineDesignation, setMagazineDesignation] = useSessionState<string>('magazineDesignation', '');
+  const [wtmName, setWtmName] = useSessionState<string>('wtmName', '');
+  const [wtmDesignation, setWtmDesignation] = useSessionState<string>('wtmDesignation', '');
 
   // Transient state (not persisted — doesn't survive refresh by design)
   const [isEditing, setIsEditing] = useState(false);
@@ -106,6 +115,15 @@ export default function BoothPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // True when the selected template uses magazine composite mode
+  const isMagazineTemplate = selectedTemplateMode === 'magazine';
+
+  // Both WTM and magazine insert an extra step at position 3
+  // This shifts capture to step 4 and result to step 5
+  const hasExtraStep = processingMode === 'word_template' || processingMode === 'magazine' || isMagazineTemplate;
+  const captureStep = hasExtraStep ? 4 : 3;
+  const resultStep  = hasExtraStep ? 5 : 4;
+
   // ─── Handlers ────────────────────────────────────────────────────
 
   const handleModeSelect = useCallback((mode: ProcessingMode) => {
@@ -113,18 +131,46 @@ export default function BoothPage() {
     setStep(2);
   }, [setProcessingMode, setStep]);
 
-  const handleTemplateSelect = useCallback((id: string) => {
+  const handleTemplateSelect = useCallback((id: string, compositeMode: string) => {
     setSelectedTemplate(id);
-  }, [setSelectedTemplate]);
+    setSelectedTemplateMode(compositeMode);
+  }, [setSelectedTemplate, setSelectedTemplateMode]);
 
   const handleTemplateNext = useCallback(() => {
     if (selectedTemplate) setStep(3);
   }, [selectedTemplate, setStep]);
 
+  const handleMagazineNameConfirm = useCallback(
+    (name: string, designation: string) => {
+      setMagazineName(name);
+      setMagazineDesignation(designation);
+      setStep(captureStep); // Jump to capture step (4)
+    },
+    [setMagazineName, setMagazineDesignation, setStep, captureStep]
+  );
+
   const handleBack = useCallback(() => {
+    // WTM: clear word selections and name/designation when stepping back from word selection screen
+    if (step === 3 && processingMode === 'word_template') {
+      setSelectedWords([]);
+      setComposedTemplatePath(null);
+      setWtmName('');
+      setWtmDesignation('');
+    }
+    // Magazine: clear name/designation when stepping back FROM name screen TO templates
+    if (step === 3 && isMagazineTemplate) {
+      setMagazineName('');
+      setMagazineDesignation('');
+    }
+    // Note: stepping back from capture (step 4) to name screen (step 3)
+    // does NOT clear values — they stay pre-filled so user doesn't re-type.
     setStep((prev: number) => Math.max(1, prev - 1));
     setError(null);
-  }, [setStep]);
+  }, [
+    step, processingMode, isMagazineTemplate,
+    setStep, setSelectedWords, setComposedTemplatePath,
+    setMagazineName, setMagazineDesignation, setWtmName, setWtmDesignation
+  ]);
 
   const compressImage = async (dataUrl: string, maxWidth = 1920, maxHeight = 1920, quality = 0.85): Promise<Blob> => {
     return new Promise((resolve, reject) => {
@@ -166,8 +212,9 @@ export default function BoothPage() {
 
     try {
       let blob: Blob;
-      
-      if (pMode === 'pre_extracted') {
+
+      const isPreExtracted = pMode === 'pre_extracted' || (pMode === 'word_template' && !!positionData);
+      if (isPreExtracted) {
         // Skip canvas compression to preserve exact PNG transparency from the extraction API
         const res = await fetch(imageData);
         blob = await res.blob();
@@ -176,19 +223,39 @@ export default function BoothPage() {
         blob = await compressImage(imageData);
       }
 
+      // WTM mode: send composed template path and use dedicated endpoint
+      const isWTM = pMode === 'word_template' && composedTemplatePath;
+
+      // Determine backend processing mode once — avoids duplicate FormData key
+      // WTM + positionData means the image was already extracted by PreviewEditScreen
+      const backendMode = (isWTM && positionData) ? 'pre_extracted' : pMode;
+
       // Build FormData
       const formData = new FormData();
       formData.append('template_id', selectedTemplate);
-      formData.append('photos', blob, pMode === 'pre_extracted' ? 'photo.png' : 'photo.jpg');
-      formData.append('processing_mode', pMode);
-      
+      formData.append('photos', blob, backendMode === 'pre_extracted' ? 'photo.png' : 'photo.jpg');
+      formData.append('processing_mode', backendMode);
+
       if (positionData) {
         formData.append('photo_position', JSON.stringify(positionData));
       }
 
+      if (isWTM) {
+        formData.append('composed_template_path', composedTemplatePath!);
+        if (wtmName) formData.append('wtm_name', wtmName);
+        if (wtmDesignation) formData.append('wtm_designation', wtmDesignation);
+      }
+
+      // Magazine mode: send name and designation
+      if (isMagazineTemplate && magazineName) {
+        formData.append('magazine_name', magazineName);
+        formData.append('magazine_designation', magazineDesignation);
+      }
+
       // Send to backend
       console.time('API Generate Request');
-      const apiRes = await fetch(`${API_BASE_URL}/api/generate`, {
+      const endpoint = isWTM ? `${API_BASE_URL}/api/wtm/generate` : `${API_BASE_URL}/api/generate`;
+      const apiRes = await fetch(endpoint, {
         method: 'POST',
         body: formData,
       });
@@ -210,7 +277,7 @@ export default function BoothPage() {
       };
 
       setResult(resultData);
-      setStep(4);
+      setStep((pMode === 'word_template' || isMagazineTemplate) ? 5 : 4);
     } catch (err) {
       console.error('Generate failed:', err);
       setError(err instanceof Error ? err.message : 'Processing failed. Please try again.');
@@ -224,6 +291,30 @@ export default function BoothPage() {
 
     if (!selectedTemplate) {
       setError('Please select a template first.');
+      return;
+    }
+
+    // WTM mode: check allow_manual_positioning from config (default true for backwards compat)
+    if (processingMode === 'word_template' && composedTemplatePath) {
+      let allowManual = true;
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/admin/wtm/templates/${selectedTemplate}/config`);
+        if (res.ok) {
+          const cfg = await res.json();
+          // If field is explicitly false, skip edit screen; missing = default true
+          allowManual = cfg.allow_manual_positioning !== false;
+        }
+      } catch { /* network error — fall back to showing edit screen */ }
+
+      if (allowManual) {
+        setRawImage(imageData);
+        setTemplateConfig({ templateType: 'sticker', isWTM: true });
+        setIsEditing(true);
+        return;
+      }
+
+      // Manual positioning disabled — go straight to generation
+      executeGeneration(imageData, processingMode);
       return;
     }
 
@@ -245,13 +336,23 @@ export default function BoothPage() {
 
     // Standard auto-compose flow
     executeGeneration(imageData, processingMode);
-  }, [selectedTemplate, processingMode]);
+  }, [selectedTemplate, processingMode, composedTemplatePath, isMagazineTemplate, magazineName, magazineDesignation]);
 
   const handleEditComplete = useCallback((extractedBase64: string, position: any) => {
     setIsEditing(false);
-    // Submit the already-transparent image using the special pre_extracted mode
-    executeGeneration(extractedBase64, "pre_extracted", position);
-  }, [selectedTemplate, processingMode]);
+    if (processingMode === 'word_template' && composedTemplatePath) {
+      executeGeneration(extractedBase64, "word_template", position);
+    } else {
+      executeGeneration(extractedBase64, "pre_extracted", position);
+    }
+  }, [selectedTemplate, processingMode, composedTemplatePath]);
+
+  const handleWordSelectionConfirm = useCallback((composedPath: string, name: string, designation: string) => {
+    setComposedTemplatePath(composedPath);
+    setWtmName(name);
+    setWtmDesignation(designation);
+    setStep(4);
+  }, [setComposedTemplatePath, setWtmName, setWtmDesignation, setStep]);
 
   const handleStartOver = useCallback(() => {
     clearSession();
@@ -259,9 +360,16 @@ export default function BoothPage() {
     setProcessingMode('frame');
     setSelectedTemplate('');
     setResult(null);
+    setSelectedWords([]);
+    setComposedTemplatePath(null);
+    setMagazineName('');
+    setMagazineDesignation('');
+    setWtmName('');
+    setWtmDesignation('');
+    setSelectedTemplateMode('');
     setError(null);
     setIsProcessing(false);
-  }, [setStep, setProcessingMode, setSelectedTemplate, setResult]);
+  }, [setStep, setProcessingMode, setSelectedTemplate, setResult, setSelectedWords, setComposedTemplatePath]);
 
   const handleError = useCallback((msg: string) => {
     setError(msg);
@@ -274,7 +382,7 @@ export default function BoothPage() {
       {/* Step Indicator (hidden on step 1 for cleaner attract screen) */}
       {step > 1 && (
         <div className={styles.stepBar}>
-          <StepIndicator currentStep={step} />
+          <StepIndicator currentStep={step} processingMode={processingMode} />
         </div>
       )}
 
@@ -285,10 +393,12 @@ export default function BoothPage() {
 
       {/* Step Content */}
       <div className={styles.stepContent}>
+        {/* Step 1 — Mode Select (all modes) */}
         {step === 1 && (
           <ModeSelectScreen onSelectMode={handleModeSelect} />
         )}
 
+        {/* Step 2 — Template Select (all modes) */}
         {step === 2 && (
           <TemplateScreen
             selectedTemplate={selectedTemplate}
@@ -299,27 +409,56 @@ export default function BoothPage() {
           />
         )}
 
-        {step === 3 && !isEditing && (
+        {/* Step 3 — Magazine: Name + Designation input */}
+        {step === 3 && isMagazineTemplate && (
+          <MagazineNameScreen
+            onConfirm={handleMagazineNameConfirm}
+            onBack={handleBack}
+            initialName={magazineName}
+            initialDesignation={magazineDesignation}
+          />
+        )}
+
+        {/* Step 3 — WTM: Word selection */}
+        {step === 3 && processingMode === 'word_template' && (
+          <WordSelectionStep
+            templateId={selectedTemplate}
+            onConfirm={handleWordSelectionConfirm}
+            onBack={handleBack}
+          />
+        )}
+
+        {/* Capture step — step 3 for normal, step 4 for WTM/magazine */}
+        {step === captureStep && !isEditing && (
           <CaptureScreen
             selectedTemplate={selectedTemplate}
             onCapture={handleImageCapture}
             onBack={handleBack}
             onError={handleError}
             isProcessing={isProcessing}
+            processingMode={processingMode}
           />
         )}
 
-        {step === 3 && isEditing && rawImage && templateConfig && (
+        {/* Edit/Preview step (same step as capture, toggled by isEditing) */}
+        {step === captureStep && isEditing && rawImage && templateConfig && (
           <PreviewEditScreen
             selectedTemplate={selectedTemplate}
             rawImage={rawImage}
             anchorMode={templateConfig.anchorMode}
             onComplete={handleEditComplete}
             onCancel={() => { setIsEditing(false); setRawImage(null); }}
+            templateImageUrl={
+              processingMode === 'word_template' && composedTemplatePath
+                ? `${API_BASE_URL}/api/wtm/composed-image?path=${encodeURIComponent(composedTemplatePath)}`
+                : undefined
+            }
+            skipConfigFetch={processingMode === 'word_template'}
           />
         )}
 
-        {step === 4 && result && (
+        {/* Result step — step 4 for normal, step 5 for WTM/magazine */}
+        {step === resultStep && result && (
           <ResultScreen
             result={result}
             onStartOver={handleStartOver}

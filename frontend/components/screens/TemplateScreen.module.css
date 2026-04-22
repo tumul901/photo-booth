@@ -1,19 +1,21 @@
 .container {
   width: 100%;
   height: 100%;
-  padding: var(--space-md);
   background: var(--color-bg-primary);
   flex-direction: column;
   display: flex;
+  overflow: hidden;
+  position: relative; /* Base for floating footer */
 }
 
 .header {
-  padding: var(--space-sm) 0 var(--space-md);
+  padding: var(--space-sm) var(--space-md);
   flex-shrink: 0;
   justify-content: space-between;
   align-items: center;
   display: flex;
   width: 100%;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .title {
@@ -24,43 +26,85 @@
   -webkit-text-fill-color: transparent;
   -webkit-background-clip: text;
   background-clip: text;
-  margin-bottom: 2px;
+  margin: 0;
 }
 
 .backButton {
   color: var(--color-text-secondary);
-  padding: var(--space-xs) var(--space-sm);
-  border-radius: var(--radius-full);
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-lg);
   background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--glass-border);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   font-size: 0.85rem;
+  font-weight: 600;
   cursor: pointer;
-  transition: all var(--transition-base);
-  min-width: 80px;
-  white-space: nowrap;
+  transition: all 0.3s ease;
+  min-width: 70px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
 }
 
 .backButton:hover {
   background: rgba(255, 255, 255, 0.1);
   color: var(--color-text-primary);
+  transform: translateX(-2px);
+}
+
+.backText {
+  display: inline;
 }
 
 .placeholder {
-  width: 80px;
+  width: 70px;
 }
 
 .scrollArea {
-  padding: var(--space-lg) 0 var(--space-sm);
   flex: 1;
   overflow-y: auto;
-  mask-image: linear-gradient(transparent 0%, #000 3% 97%, transparent 100%);
+  /* Massive bottom padding to clear the 120px floating footer */
+  padding: var(--space-md) var(--space-md) 140px; 
+  scrollbar-gutter: stable;
+}
+
+/* Custom scrollbar for better visibility on dark theme */
+.scrollArea::-webkit-scrollbar {
+  width: 6px;
+}
+
+.scrollArea::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollArea::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
 }
 
 .footer {
-  padding: var(--space-2xl) 0 var(--space-xl);
-  flex-shrink: 0;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 120px;
+  padding: var(--space-lg);
   justify-content: center;
+  align-items: center;
   display: flex;
+  z-index: 50;
+  
+  /* Premium Glassmorphic Gradient */
+  background: linear-gradient(
+    to top, 
+    var(--color-bg-primary) 40%, 
+    rgba(15, 15, 26, 0.6) 80%, 
+    transparent
+  );
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .nextButton {
@@ -68,46 +112,63 @@
   color: #fff;
   border: none;
   border-radius: var(--radius-full);
-  box-shadow: var(--shadow-glow);
-  padding: 0.8rem 2.5rem;
-  font-size: 1rem;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+  padding: 0.9rem 3rem;
+  font-size: 1.1rem;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  width: 100%;
+  max-width: 300px;
 }
 
-.nextButton:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 0 25px rgba(102, 126, 234, 0.6);
+.nextButton:hover:not(:disabled) {
+  transform: translateY(-3px) scale(1.02);
+  box-shadow: 0 8px 25px rgba(102, 126, 234, 0.6);
 }
 
-.nextButton:active {
-  transform: translateY(0) scale(0.97);
+.nextButton:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
 }
 
 .nextButton:disabled {
-  opacity: 0.4;
+  opacity: 0.3;
   cursor: not-allowed;
-  box-shadow: none;
-  transform: none;
+  filter: grayscale(1);
 }
 
 @media (max-width: 600px) {
   .header {
-    padding: var(--space-xs) 0 var(--space-sm);
+    padding: var(--space-sm) 0;
   }
 
   .title {
-    font-size: 1.3rem;
+    font-size: 1.25rem;
   }
 
   .backButton {
-    font-size: 0.85rem;
-    padding: var(--space-xs) var(--space-sm);
+    min-width: 0;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border-radius: 50%;
+  }
+
+  .backText {
+    display: none;
+  }
+
+  .footer {
+    height: 100px;
+    padding: var(--space-md);
+  }
+
+  .scrollArea {
+    padding-bottom: 120px;
   }
 
   .nextButton {
-    padding: 0.8rem 2rem;
-    font-size: 1rem;
+    max-width: none;
+    padding: 0.85rem 2rem;
   }
 }

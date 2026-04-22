@@ -12,8 +12,8 @@ import styles from './TemplateScreen.module.css';
 
 interface TemplateScreenProps {
   selectedTemplate: string;
-  processingMode: 'frame' | 'sticker';
-  onSelect: (id: string) => void;
+  processingMode: 'frame' | 'sticker' | 'word_template' | 'magazine';
+  onSelect: (id: string, compositeMode: string) => void;
   onNext: () => void;
   onBack: () => void;
 }
@@ -28,7 +28,9 @@ export default function TemplateScreen({
   return (
     <div className={styles.container}>
       <header className={styles.header}>
-        <button className={styles.backButton} onClick={onBack}>← Back</button>
+        <button className={styles.backButton} onClick={onBack}>
+          ←<span className={styles.backText}> Back</span>
+        </button>
         <h2 className={styles.title}>Choose Your Template</h2>
         <div className={styles.placeholder} />
       </header>

@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef } from 'react';
 import styles from './page.module.css';
 import TemplateEditor from '@/components/TemplateEditor';
+import WTMAdmin from '@/components/WTMAdmin';
+import MagazineAdmin from '@/components/MagazineAdmin';
 
 // Types
 interface Stats {
@@ -30,10 +32,11 @@ interface GalleryItem {
 interface TemplateConfig {
   templateId: string;
   name: string;
-  templateType: 'frame' | 'sticker';
-  compositeMode: 'background' | 'overlay';
+  templateType: 'frame' | 'sticker' | 'magazine';
+  compositeMode: 'background' | 'overlay' | 'magazine';
   stickerFilter: 'none' | 'bw' | 'sketch';
   pngUrl: string;
+  fg_path?: string;
   anchorMode: 'face_center' | 'eyes' | 'none';
   dimensions: { width: number; height: number };
   slots: Array<{
@@ -53,7 +56,7 @@ interface TemplateConfig {
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export default function AdminPage() {
-  const [activeTab, setActiveTab] = useState<'stats' | 'templates' | 'gallery'>('stats');
+  const [activeTab, setActiveTab] = useState<'stats' | 'templates' | 'gallery' | 'wtm' | 'magazine'>('stats');
   const [stats, setStats] = useState<Stats | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([]);
@@ -211,7 +214,7 @@ export default function AdminPage() {
       <TemplateEditor
         templateId={editingTemplate.id}
         templateName={editingTemplate.name}
-        imageUrl={`${API_BASE_URL}/api/templates/${editingTemplate.id}/image`}
+        imageUrl={`${API_BASE_URL}/api/admin/templates/${editingTemplate.id}/image`}
         onSave={handleSaveConfig}
         onCancel={handleCancelEdit}
       />
@@ -240,6 +243,18 @@ export default function AdminPage() {
             onClick={() => setActiveTab('gallery')}
           >
             📸 Gallery
+          </button>
+          <button
+            className={`${styles.navButton} ${activeTab === 'wtm' ? styles.active : ''}`}
+            onClick={() => setActiveTab('wtm')}
+          >
+            🔤 Word Templates
+          </button>
+          <button
+            className={`${styles.navButton} ${activeTab === 'magazine' ? styles.active : ''}`}
+            onClick={() => setActiveTab('magazine')}
+          >
+            📰 Magazine
           </button>
         </nav>
       </header>
@@ -272,6 +287,11 @@ export default function AdminPage() {
           <div>
             <h2 className={styles.sectionTitle}>Manage Templates</h2>
             
+            {/* Tip Banner */}
+            <div className={styles.tipBanner}>
+              <strong>Tip:</strong> Design templates at <strong>1080px on the shortest side</strong> (e.g. 1080×1350 portrait, 1080×1920 stories, 1080×1080 square). This avoids all internal resizing and gives the fastest processing with full-quality output.
+            </div>
+
             {/* Upload Controls */}
             <div className={styles.controls}>
               <div className={styles.inputGroup}>
@@ -393,6 +413,14 @@ export default function AdminPage() {
               <p style={{textAlign:'center', color:'#666', marginTop:'2rem'}}>No photos yet. Generate some to see them here!</p>
             )}
           </div>
+        )}
+
+        {!loading && !error && activeTab === 'wtm' && (
+          <WTMAdmin apiBaseUrl={API_BASE_URL} />
+        )}
+
+        {activeTab === 'magazine' && (
+          <MagazineAdmin apiBaseUrl={API_BASE_URL} />
         )}
       </div>
     </main>
