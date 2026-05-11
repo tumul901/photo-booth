@@ -37,3 +37,7 @@ npm-debug.log*
 
 # Stats data
 backend/data/stats.json
+
+# Markdown files (noisy docs)
+*.md
+!README.md
