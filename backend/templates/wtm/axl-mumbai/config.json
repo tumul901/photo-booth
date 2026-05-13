@@ -88,9 +88,9 @@
   ],
   "bundles": [],
   "max_selections": 6,
-  "allow_manual_positioning": true,
+  "allow_manual_positioning": false,
   "created_at": "2026-05-12T13:10:03.419952+00:00",
-  "updated_at": "2026-05-13T06:38:24.464859+00:00",
+  "updated_at": "2026-05-13T11:12:20.747796+00:00",
   "photo_slot": {
     "x": 3,
     "y": 216,
