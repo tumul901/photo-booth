@@ -126,6 +126,24 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
+.adjustButton {
+  background: transparent;
+  width: 100%;
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-full);
+  border: 1.5px solid var(--color-border);
+  padding: 0.7rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.adjustButton:hover {
+  border-color: var(--color-accent-primary);
+  color: var(--color-accent-primary);
+}
+
 .startOverButton {
   background: var(--color-bg-tertiary);
   width: 100%;

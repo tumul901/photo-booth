@@ -18,9 +18,10 @@ interface ResultScreenProps {
     printHeightMm?: number;
   };
   onStartOver: () => void;
+  onAdjustPlacement?: () => void;
 }
 
-export default function ResultScreen({ result, onStartOver }: ResultScreenProps) {
+export default function ResultScreen({ result, onStartOver, onAdjustPlacement }: ResultScreenProps) {
   return (
     <div className={styles.container}>
       <div className={styles.splitLayout}>
@@ -46,6 +47,11 @@ export default function ResultScreen({ result, onStartOver }: ResultScreenProps)
           </div>
 
           <div className={styles.footer}>
+            {onAdjustPlacement && (
+              <button className={styles.adjustButton} onClick={onAdjustPlacement}>
+                ✦ Adjust Sticker Placement
+              </button>
+            )}
             <button className={styles.startOverButton} onClick={onStartOver}>
               ↻ Start Over
             </button>

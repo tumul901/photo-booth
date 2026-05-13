@@ -388,23 +388,19 @@ export default function BoothPage() {
       return;
     }
 
-    // Check if template permits interactive manual positioning
+    // Store raw image so user can re-open placement editor from the result screen
+    setRawImage(imageData);
+
+    // Fetch config for the placement editor (needed if user hits "Adjust Sticker Placement")
     try {
       const res = await fetch(`${API_BASE_URL}/api/admin/templates/${selectedTemplate}/config`);
       if (res.ok) {
         const config = await res.json();
-        if (config.allowManualPositioning) {
-          setRawImage(imageData);
-          setTemplateConfig(config);
-          setIsEditing(true);
-          return;
-        }
+        setTemplateConfig(config);
       }
-    } catch (e) {
-      console.error("Config fetch failed, proceeding to direct generate");
-    }
+    } catch { /* proceed without config — editor uses defaults */ }
 
-    // Standard auto-compose flow
+    // Auto-generate immediately; user can adjust placement from result screen
     executeGeneration(imageData, processingMode);
   }, [selectedTemplate, processingMode, composedTemplatePath, executeGeneration]);
 
@@ -528,14 +524,18 @@ export default function BoothPage() {
           />
         )}
 
-        {/* Edit/Preview step (same step as capture, toggled by isEditing) */}
-        {step === captureStep && isEditing && rawImage && templateConfig && (
+        {/* Edit/Preview — shown at captureStep for WTM first-edit, or at resultStep for post-result adjustment */}
+        {(step === captureStep || step === resultStep) && isEditing && rawImage && templateConfig && (
           <PreviewEditScreen
             selectedTemplate={selectedTemplate}
             rawImage={rawImage}
             anchorMode={templateConfig.anchorMode}
             onComplete={handleEditComplete}
-            onCancel={() => { setIsEditing(false); setRawImage(null); }}
+            onCancel={
+              step === resultStep
+                ? () => setIsEditing(false)
+                : () => { setIsEditing(false); setRawImage(null); }
+            }
             templateImageUrl={
               processingMode === 'word_template' && composedTemplatePath
                 ? `${API_BASE_URL}/api/wtm/composed-image?path=${encodeURIComponent(composedTemplatePath)}`
@@ -547,10 +547,15 @@ export default function BoothPage() {
         )}
 
         {/* Result step — step 4 for normal, step 5 for WTM/magazine */}
-        {step === resultStep && result && (
+        {step === resultStep && result && !isEditing && (
           <ResultScreen
             result={result}
             onStartOver={handleStartOver}
+            onAdjustPlacement={
+              rawImage && templateConfig && processingMode !== 'word_template' && processingMode !== 'magazine'
+                ? () => setIsEditing(true)
+                : undefined
+            }
           />
         )}
       </div>
