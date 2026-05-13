@@ -10,7 +10,7 @@
 
 .header {
   width: 100%;
-  padding: var(--space-sm) var(--space-md);
+  padding: 6px 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -23,11 +23,11 @@
 
 .backButton {
   color: var(--color-text-secondary);
-  padding: var(--space-xs) var(--space-sm);
+  padding: 4px 10px;
   border-radius: var(--radius-full);
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--glass-border);
-  font-size: 0.85rem;
+  font-size: 0.75rem;
   cursor: pointer;
   transition: all var(--transition-base);
   display: flex;
@@ -60,9 +60,9 @@
 }
 
 .toggleBtn {
-  padding: 0.4rem 1rem;
+  padding: 0.25rem 0.75rem;
   border-radius: var(--radius-full);
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   font-weight: 500;
   color: var(--color-text-muted);
   background: transparent;

@@ -53,15 +53,17 @@
 
 /* Mode Selection Cards */
 .modeCards {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: var(--space-lg);
   width: 100%;
-  justify-items: center;
 }
 
 .modeCard {
   width: 100%;
+  max-width: 260px;
+  flex: 1 1 200px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -128,7 +130,6 @@
   }
 
   .modeCards {
-    grid-template-columns: repeat(2, 1fr);
     gap: var(--space-md);
   }
 
@@ -155,6 +156,7 @@
   .modeCard {
     padding: var(--space-lg) var(--space-sm);
     border-radius: var(--radius-lg);
+    flex: 1 1 140px;
   }
 
   .modeIcon {

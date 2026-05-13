@@ -95,6 +95,21 @@ export default function WordSelectionStep({ templateId, onConfirm, onBack }: Wor
     );
   }
 
+  if (wordsPayload.slot_count === 0) {
+    return (
+      <div className={styles.centered}>
+        <p className={styles.emptyText}>
+          This template has no placement slots configured.
+          <br />
+          Go to Admin → Word Templates → Edit Slots to set them up first.
+        </p>
+        <button className={styles.backButton} onClick={onBack}>
+          ←<span className={styles.backText}> Back</span>
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.container}>
       <header className={styles.header}>

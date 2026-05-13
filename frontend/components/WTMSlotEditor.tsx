@@ -122,8 +122,11 @@ const WTMSlotEditor: React.FC<WTMSlotEditorProps> = ({ config, apiBaseUrl, onSav
   };
 
   useEffect(() => {
-    window.addEventListener('resize', handleImageLoad);
-    return () => window.removeEventListener('resize', handleImageLoad);
+    const el = imageRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(handleImageLoad);
+    observer.observe(el);
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {

@@ -1,0 +1,61 @@
+{
+  "templateId": "luggage-tag",
+  "name": "luggage-tag",
+  "templateType": "sticker",
+  "compositeMode": "background",
+  "pngUrl": "luggage-tag.png",
+  "png_path": "luggage-tag.png",
+  "fg_path": "",
+  "anchorMode": "none",
+  "stickerFilter": "none",
+  "showVisualGuide": false,
+  "allowManualPositioning": false,
+  "dimensions": {
+    "width": 638,
+    "height": 1016
+  },
+  "slots": [
+    {
+      "slotId": "slot1",
+      "x": 120,
+      "y": 467,
+      "width": 403,
+      "height": 553,
+      "anchor": {
+        "targetX": 201,
+        "targetY": 193
+      },
+      "desiredFaceRatio": 0.25,
+      "minZoom": 0.5,
+      "maxZoom": 2.5,
+      "zIndex": 0
+    }
+  ],
+  "metadata": {
+    "category": "custom",
+    "tags": [],
+    "author": "Admin"
+  },
+  "name_text": {
+    "x": 564,
+    "y": 450,
+    "fontSize": 60,
+    "color": "#FFFFFF",
+    "fontPath": "",
+    "fontName": "",
+    "maxWidth": 0,
+    "align": "left",
+    "uppercase": false,
+    "rotation": 90.0
+  },
+  "designation_text": {},
+  "fg_offset": {
+    "x": 0,
+    "y": 0
+  },
+  "luggage_card_mode": true,
+  "print_dpi": 300,
+  "print_width_mm": 54.0,
+  "print_height_mm": 86.0,
+  "output_format": "png"
+}

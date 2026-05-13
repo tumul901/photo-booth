@@ -62,14 +62,16 @@ class MagazineTextConfig:
     Coordinates are in the template's native pixel space (matching the dimensions
     stored in the JSON). They are scaled by res_multiplier at render time.
     """
-    x: int                      # Left edge of text in template-native pixels
-    y: int                      # Top edge of text in template-native pixels
+    x: int                      # Left edge / rotation pivot X in template-native pixels
+    y: int                      # Top edge / rotation pivot Y in template-native pixels
     font_size: int              # Font size in template-native pixels (scaled at render)
     color: str = "#FFFFFF"      # CSS hex color, e.g. "#FFFFFF" or "white"
     font_path: str = ""         # Absolute path to a .ttf font file; empty = use default
+    font_name: str = ""         # Font stem name (e.g. "Roboto-Bold"); resolved to path at render
     max_width: int = 0          # If > 0, text is clamped/wrapped to this width (native px)
     align: str = "left"         # "left", "center", "right"
     uppercase: bool = False     # If True, force text to uppercase before drawing
+    rotation: float = 0.0       # Rotation degrees (CCW positive). (x,y) is the rotation pivot.
 
 @dataclass
 class TemplateMetadata:
@@ -87,9 +89,14 @@ class TemplateMetadata:
     fg_path: str = ""  # Magazine mode: foreground overlay PNG (goes on top of user)
     fg_offset: Optional[Dict] = None  # Magazine mode: FG overlay position offset {x, y}
 
-    # Magazine mode: dynamic text positions
-    name_text: Optional['MagazineTextConfig'] = None         # Where to draw the person's name
-    designation_text: Optional['MagazineTextConfig'] = None  # Where to draw their designation
+    # Text overlay positions (used by magazine mode and sticker/luggage card mode)
+    name_text: Optional['MagazineTextConfig'] = None
+    designation_text: Optional['MagazineTextConfig'] = None
+
+    # Luggage card printing mode
+    luggage_card_mode: bool = False   # True = exact pixel canvas, no auto-upscale, print output
+    print_dpi: int = 300              # DPI for luggage card output (300 or 600)
+    output_format: str = "jpeg"       # "png" | "jpeg_print" | "jpeg" (luggage card overrides to PNG or q95 JPEG)
 
 def clear_template_cache():
     """Clear in-memory caches when templates are updated."""
@@ -173,19 +180,32 @@ def load_template_metadata(template_id: str, templates_dir: Optional[str] = None
                 if resolved_fg:
                     raw_fg = os.path.basename(resolved_fg)
 
-            # --- Magazine text config ---
+            # --- Text overlay config (magazine + sticker/luggage card) ---
             def _parse_text_cfg(raw: dict) -> Optional[MagazineTextConfig]:
                 if not raw:
                     return None
+                font_path = raw.get("fontPath", "")
+                font_name = raw.get("fontName", "")
+                # Resolve font_name stem to absolute path if fontPath not set
+                if font_name and not font_path:
+                    try:
+                        from utils.wtm_utils import find_font_path
+                        resolved = find_font_path(font_name)
+                        if resolved:
+                            font_path = str(resolved)
+                    except Exception:
+                        pass
                 return MagazineTextConfig(
                     x=int(raw.get("x", 0)),
                     y=int(raw.get("y", 0)),
                     font_size=int(raw.get("fontSize", 60)),
                     color=raw.get("color", "#FFFFFF"),
-                    font_path=raw.get("fontPath", ""),
+                    font_path=font_path,
+                    font_name=font_name,
                     max_width=int(raw.get("maxWidth", 0)),
                     align=raw.get("align", "left"),
                     uppercase=bool(raw.get("uppercase", False)),
+                    rotation=float(raw.get("rotation", 0.0)),
                 )
 
             name_text_cfg = _parse_text_cfg(data.get("name_text", {}))
@@ -209,6 +229,9 @@ def load_template_metadata(template_id: str, templates_dir: Optional[str] = None
                 sticker_filter=data.get("stickerFilter", "none"),
                 name_text=name_text_cfg,
                 designation_text=designation_text_cfg,
+                luggage_card_mode=bool(data.get("luggage_card_mode", False)),
+                print_dpi=int(data.get("print_dpi", 300)),
+                output_format=data.get("output_format", "jpeg"),
             )
         except Exception as e:
             print(f"Error parse template {json_path}: {e}")
@@ -300,49 +323,57 @@ class ComposeService:
         
         # === FULL FRAME ANCHORING (Green screen logic) ===
         if anchor_mode == "full_frame":
-            # Just forcefully resize the uncropped camera capture to perfectly map the slot (which should be template size)
             print(f"DEBUG SmartFit: 'full_frame' scaling. Forcing output={slot.width}×{slot.height}")
-            return sticker.resize((slot.width, slot.height), Image.Resampling.BICUBIC)
-            
+            return self._resample(sticker, slot.width, slot.height, reason="full_frame")
+
         # Logic 1: Face Size Normalization
         # Skip face size normalization if anchor_mode is 'none' (user wants it dumped in the box)
         if face_height and slot.desired_face_ratio and getattr(slot, '_temp_anchor_mode', 'none') != 'none':
             target_face_h = slot.height * slot.desired_face_ratio
             scale = target_face_h / face_height
-            
-            # Clamp scale
             scale = max(slot.min_zoom, min(slot.max_zoom, scale))
-            
             new_w = int(sticker_w * scale)
             new_h = int(sticker_h * scale)
-            
             print(f"DEBUG SmartFit: Face-based scaling. Ratio={slot.desired_face_ratio}, Scale={scale:.2f}, output={new_w}×{new_h}")
-            return sticker.resize((new_w, new_h), Image.Resampling.BICUBIC)
+            return self._resample(sticker, new_w, new_h, reason=f"face_norm scale={scale:.2f}")
 
         # Logic 2: Standard Fit (no face detected)
         slot_w, slot_h = slot.width, slot.height
-        
+
         if fit_mode == "contain":
-            # For stickers (typically people with BG removed):
-            # Scale to FILL the slot HEIGHT - this ensures the person is full-size
-            # We want the sticker to be as tall as the slot (minus some padding)
-            target_fill_ratio = 0.90  # 90% of slot height
-            
-            # Scale based on HEIGHT (not the smaller dimension)
+            target_fill_ratio = 0.90
             scale = (slot_h * target_fill_ratio) / sticker_h
-            
-            # Clamp scale to reasonable bounds
             scale = max(slot.min_zoom, min(slot.max_zoom, scale))
-            
             print(f"DEBUG SmartFit: Height-fill mode. Scale={scale:.2f}")
         else:  # cover
             scale = max(slot_w / sticker_w, slot_h / sticker_h)
             print(f"DEBUG SmartFit: Cover mode. Scale={scale:.2f}")
-            
+
         new_w = int(sticker_w * scale)
         new_h = int(sticker_h * scale)
         print(f"DEBUG SmartFit: Output={new_w}×{new_h}")
-        return sticker.resize((new_w, new_h), Image.Resampling.BICUBIC)
+        return self._resample(sticker, new_w, new_h, reason=f"{fit_mode} scale={scale:.2f}")
+
+    @staticmethod
+    def _resample(img: Image.Image, w: int, h: int, reason: str = "") -> Image.Image:
+        """
+        Resample sticker to target size with the best algorithm for the direction.
+        LANCZOS is sharper than BICUBIC for both up- and down-scaling on RGBA imagery
+        with high-frequency edges (rembg cutouts).
+        """
+        if w <= 0 or h <= 0:
+            return img
+        if (img.width, img.height) == (w, h):
+            return img
+        t0 = time.perf_counter()
+        out = img.resize((w, h), Image.Resampling.LANCZOS)
+        dirn = "up" if (w * h) > (img.width * img.height) else "down"
+        print(
+            f"PERF [resample] LANCZOS {dirn} {img.width}x{img.height} -> {w}x{h} "
+            f"reason='{reason}' in {(time.perf_counter() - t0)*1000:.0f}ms",
+            flush=True,
+        )
+        return out
 
     def calculate_placement(
         self,
@@ -487,7 +518,6 @@ class ComposeService:
 
         # If max_width is set, truncate text to fit (single line only — no wrapping)
         if max_width > 0:
-            # Linear pruning: trim one char at a time until it fits
             truncated = False
             while len(display_text) > 1:
                 bbox = draw.textbbox((0, 0), display_text, font=font)
@@ -497,21 +527,62 @@ class ComposeService:
                 display_text = display_text[:-1]
                 truncated = True
             if truncated and len(display_text) > 3:
-                display_text = display_text[:-1] + '…'  # Add ellipsis when truncated
+                display_text = display_text[:-1] + '…'
 
-        # Alignment offset
-        if cfg.align in ("center", "right"):
-            bbox = draw.textbbox((0, 0), display_text, font=font)
-            text_w = bbox[2] - bbox[0]
+        # Alignment offset (applied before rotation; or used to compute pivot)
+        text_bbox = draw.textbbox((0, 0), display_text, font=font)
+        text_w = text_bbox[2] - text_bbox[0]
+
+        if cfg.rotation == 0.0:
+            # --- No rotation: existing path ---
+            if cfg.align in ("center", "right"):
+                if cfg.align == "center":
+                    ref_w = max_width if max_width > 0 else (canvas.width - x)
+                    x = x + (ref_w - text_w) // 2
+                else:
+                    ref_w = max_width if max_width > 0 else (canvas.width - x)
+                    x = x + ref_w - text_w
+            draw.text((x, y), display_text, font=font, fill=colour_rgba)
+            print(f"DEBUG Text: drew '{display_text}' at ({x},{y}) size={font_size}", flush=True)
+        else:
+            # --- Rotation path: render to a tight RGBA layer, rotate, paste ---
+            import math
+            pad = 4  # small padding so edge pixels are not clipped
+            text_h = text_bbox[3] - text_bbox[1]
+            layer_w = text_w + pad * 2
+            layer_h = text_h + pad * 2
+            text_layer = Image.new("RGBA", (layer_w, layer_h), (0, 0, 0, 0))
+            layer_draw = ImageDraw.Draw(text_layer)
+            # Draw text offset by bbox origin + padding so it sits at (pad, pad)
+            layer_draw.text((-text_bbox[0] + pad, -text_bbox[1] + pad), display_text, font=font, fill=colour_rgba)
+
+            # Determine pivot point within the unrotated layer based on align
             if cfg.align == "center":
-                ref_w = max_width if max_width > 0 else (canvas.width - x)
-                x = x + (ref_w - text_w) // 2
-            else:  # right
-                ref_w = max_width if max_width > 0 else (canvas.width - x)
-                x = x + ref_w - text_w
+                pivot_x = layer_w / 2.0
+            elif cfg.align == "right":
+                pivot_x = layer_w - pad
+            else:  # left
+                pivot_x = float(pad)
+            pivot_y = float(pad)  # top of text
 
-        draw.text((x, y), display_text, font=font, fill=colour_rgba)
-        print(f"DEBUG Magazine Text: drew '{display_text}' at ({x},{y}) size={font_size}", flush=True)
+            # PIL rotates CCW for positive angle; expand=True grows the bbox to fit
+            rotated = text_layer.rotate(cfg.rotation, expand=True, resample=Image.Resampling.BICUBIC)
+
+            # After rotate(expand=True), the original layer center maps to rotated center.
+            # Compute where the pivot point lands in the rotated bitmap.
+            a = math.radians(cfg.rotation)
+            cx, cy = layer_w / 2.0, layer_h / 2.0
+            dx, dy = pivot_x - cx, pivot_y - cy
+            rdx = dx * math.cos(a) + dy * math.sin(a)
+            rdy = -dx * math.sin(a) + dy * math.cos(a)
+            pivot_in_rotated_x = rotated.width / 2.0 + rdx
+            pivot_in_rotated_y = rotated.height / 2.0 + rdy
+
+            # Paste so the rotated pivot lands at the configured (x, y)
+            paste_x = int(round(x - pivot_in_rotated_x))
+            paste_y = int(round(y - pivot_in_rotated_y))
+            canvas.alpha_composite(rotated, (max(0, paste_x), max(0, paste_y)))
+            print(f"DEBUG Text (rotated {cfg.rotation}°): drew '{display_text}' pivot=({x},{y}) size={font_size}", flush=True)
 
     def compose_final(
         self,
@@ -523,6 +594,8 @@ class ComposeService:
         fg_template_path: Optional[str] = None,  # Magazine mode: foreground overlay
         magazine_name: str = "",           # Magazine mode: person's name
         magazine_designation: str = "",    # Magazine mode: person's designation
+        overlay_name: str = "",            # Sticker/luggage card: person's name
+        overlay_designation: str = "",     # Sticker/luggage card: person's designation
     ) -> Image.Image:
         """
         Main entry point for final sticker-style composition.
@@ -533,7 +606,11 @@ class ComposeService:
         # If the template is defined at low resolution (e.g. 400px), we scale the entire
         # process up to a target resolution (e.g. 1080p min dimension) so the high-res 
         # webcam photos are not crushed into thumbnail size.
-        res_multiplier = max(1.0, 1080 / min(template_meta.width, template_meta.height))
+        if template_meta.luggage_card_mode:
+            # Luggage card: canvas must stay at the exact print pixel dimensions — no upscale.
+            res_multiplier = 1.0
+        else:
+            res_multiplier = max(1.0, 1080 / min(template_meta.width, template_meta.height))
         
         canvas_w = int(template_meta.width * res_multiplier)
         canvas_h = int(template_meta.height * res_multiplier)
@@ -678,15 +755,21 @@ class ComposeService:
                     landmarks_scaled # Use scaled landmarks
                 )
 
-            # Paste photo onto canvas, clipped to slot bounds
-            # (Critical for WTM where photo_slot != full canvas. No-op when slot == canvas.)
-            print(f"DEBUG Compose: Sticker placement: sticker_scaled={sticker_scaled.size}, paste_at=({x},{y}), slot=({s_slot.x},{s_slot.y},{s_slot.width},{s_slot.height}), canvas={canvas.size}", flush=True)
+            # Paste photo onto canvas, clipped to slot bounds.
+            # When the sticker has a stroke effect, expand the clip region slightly
+            # so the outline isn't hard-clipped at the slot edges.
+            from services.feature_flags_service import get_sticker_effect as _get_effect, get_sticker_stroke_width as _get_width
+            _stroke_pad = 0
+            if _get_effect() == "stroke":
+                # apply_stroke pads by (width + 2) on each side; scale to match canvas resolution.
+                _stroke_pad = int((_get_width() + 2) * res_multiplier)
+            print(f"DEBUG Compose: Sticker placement: sticker_scaled={sticker_scaled.size}, paste_at=({x},{y}), slot=({s_slot.x},{s_slot.y},{s_slot.width},{s_slot.height}), canvas={canvas.size}, stroke_pad={_stroke_pad}", flush=True)
             sx, sy = s_slot.x, s_slot.y
             sw, sh = s_slot.width, s_slot.height
-            clip_l = max(0, sx - x)
-            clip_t = max(0, sy - y)
-            clip_r = min(sticker_scaled.width, sx + sw - x)
-            clip_b = min(sticker_scaled.height, sy + sh - y)
+            clip_l = max(0, (sx - _stroke_pad) - x)
+            clip_t = max(0, (sy - _stroke_pad) - y)
+            clip_r = min(sticker_scaled.width, (sx + sw + _stroke_pad) - x)
+            clip_b = min(sticker_scaled.height, (sy + sh + _stroke_pad) - y)
             print(f"DEBUG Compose: Clip bounds: l={clip_l}, t={clip_t}, r={clip_r}, b={clip_b}", flush=True)
             if clip_r > clip_l and clip_b > clip_t:
                 clipped = sticker_scaled.crop((clip_l, clip_t, clip_r, clip_b))
@@ -766,26 +849,32 @@ class ComposeService:
             canvas = Image.alpha_composite(canvas, template)
             print(f"PERF:   alpha_comp:    {time.perf_counter() - t_comp:.2f}s", flush=True)
 
-        # --- Text overlays: fire for any composite mode (magazine, WTM background, sticker) ---
-        if magazine_name and template_meta.name_text:
+        # --- Text overlays ---
+        # Magazine flow uses magazine_name/magazine_designation.
+        # Sticker/luggage card flow uses overlay_name/overlay_designation.
+        # Each pair is independent — mixing them does not happen by design.
+        name_value = overlay_name or magazine_name
+        desig_value = overlay_designation or magazine_designation
+
+        if name_value and template_meta.name_text:
             self._draw_magazine_text(
                 canvas=canvas,
-                text=magazine_name,
+                text=name_value,
                 cfg=template_meta.name_text,
                 res_multiplier=res_multiplier,
             )
-        elif magazine_name:
-            print("DEBUG Compose: magazine_name provided but name_text config missing in template JSON", flush=True)
+        elif name_value:
+            print("DEBUG Compose: name provided but name_text config missing in template JSON", flush=True)
 
-        if magazine_designation and template_meta.designation_text:
+        if desig_value and template_meta.designation_text:
             self._draw_magazine_text(
                 canvas=canvas,
-                text=magazine_designation,
+                text=desig_value,
                 cfg=template_meta.designation_text,
                 res_multiplier=res_multiplier,
             )
-        elif magazine_designation:
-            print("DEBUG Compose: magazine_designation provided but designation_text config missing in template JSON", flush=True)
+        elif desig_value:
+            print("DEBUG Compose: designation provided but designation_text config missing in template JSON", flush=True)
 
         return canvas
 

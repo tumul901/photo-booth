@@ -1,0 +1,541 @@
+/* GalleryPanel */
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.toolbarLeft {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.toolbarRight {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.subtitle {
+  font-size: 0.82rem;
+  color: #888;
+}
+
+.refreshTime {
+  color: var(--color-text-muted);
+}
+
+.countBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  background: rgba(102, 126, 234, 0.35);
+  color: #a5b4fc;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.smallBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: rgba(102, 126, 234, 0.3);
+  color: #a5b4fc;
+  font-size: 0.7rem;
+  font-weight: 600;
+  margin-left: 4px;
+}
+
+/* View toggle */
+.viewToggle {
+  display: flex;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.toggleBtn {
+  padding: 0.35rem 0.85rem;
+  background: transparent;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  font-size: 0.82rem;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+}
+
+.toggleBtn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #ccc;
+}
+
+.toggleActive {
+  background: rgba(102, 126, 234, 0.2);
+  color: #a5b4fc;
+}
+
+/* Filter select */
+.filterSelect {
+  padding: 0.4rem 2rem 0.4rem 0.8rem;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23a5b4fc' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.6rem center;
+  background-size: 1rem;
+  min-width: 160px;
+  box-shadow: var(--shadow-sm);
+}
+
+.filterSelect:hover {
+  border-color: var(--color-accent-primary);
+  background-color: var(--color-bg-tertiary);
+  box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+}
+
+.filterSelect:focus {
+  outline: none;
+  border-color: var(--color-accent-primary);
+  box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.15);
+}
+
+.filterSelect option {
+  background-color: #1a1a2e; /* Fallback for browsers that don't support vars in options */
+  color: #fff;
+  padding: 10px;
+}
+
+/* Buttons */
+.btnOutline {
+  padding: 0.35rem 0.9rem;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  color: #a5b4fc;
+  cursor: pointer;
+  font-size: 0.82rem;
+  transition: all 0.15s;
+}
+
+.btnOutline:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+}
+
+.selectionBar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.selCount {
+  font-size: 0.82rem;
+  color: #a5b4fc;
+  white-space: nowrap;
+  padding: 0 0.25rem;
+}
+
+.btnSmall {
+  padding: 0.3rem 0.75rem;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: #ccc;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: all 0.15s;
+}
+
+.btnSmall:hover:not(:disabled) {
+  background: rgba(102, 126, 234, 0.2);
+  color: #fff;
+  border-color: rgba(102, 126, 234, 0.4);
+}
+
+.btnSmall:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btnDangerSmall {
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.btnDangerSmall:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #ef4444;
+}
+
+/* Grid */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+/* Card */
+.card {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  overflow: hidden;
+  transition: transform 0.15s, border-color 0.15s;
+  cursor: default;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(102, 126, 234, 0.4);
+}
+
+.cardSelected {
+  border-color: #667eea;
+  background: rgba(102, 126, 234, 0.1);
+}
+
+.imageWrapper {
+  position: relative;
+  aspect-ratio: 1;
+  background: #1a1a2e;
+  overflow: hidden;
+}
+
+.image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.checkbox {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  color: #fff;
+  transition: all 0.12s;
+}
+
+.checkboxChecked {
+  background: #667eea;
+  border-color: #667eea;
+}
+
+.deleteOverlay {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  background: rgba(239, 68, 68, 0.85);
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.imageWrapper:hover .deleteOverlay {
+  opacity: 1;
+}
+
+.deleteOverlay:hover {
+  background: #ef4444;
+}
+
+.cardInfo {
+  padding: 0.5rem 0.75rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.cardInfoRight {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.timestamp {
+  font-size: 0.7rem;
+  color: #888;
+}
+
+.size {
+  font-size: 0.7rem;
+  color: #667eea;
+  font-weight: 500;
+}
+
+.downloadBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 5px;
+  background: rgba(102, 126, 234, 0.15);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  color: #a5b4fc;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-decoration: none;
+  line-height: 1;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+
+.downloadBtn:hover {
+  background: rgba(102, 126, 234, 0.35);
+  border-color: #667eea;
+  color: #fff;
+}
+
+.archiveBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 5px;
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  color: #fbbf24;
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  line-height: 1;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+
+.archiveBtn:hover {
+  background: rgba(251, 191, 36, 0.3);
+  border-color: #fbbf24;
+  color: #fff;
+}
+
+.unarchiveBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 5px;
+  background: rgba(52, 211, 153, 0.12);
+  border: 1px solid rgba(52, 211, 153, 0.3);
+  color: #34d399;
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  line-height: 1;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+
+.unarchiveBtn:hover {
+  background: rgba(52, 211, 153, 0.3);
+  border-color: #34d399;
+  color: #fff;
+}
+
+/* Infinite scroll */
+.sentinel {
+  height: 1px;
+}
+
+.loadingMore {
+  text-align: center;
+  color: #666;
+  font-size: 0.85rem;
+  padding: 1rem;
+}
+
+.empty {
+  text-align: center;
+  color: #555;
+  margin-top: 2rem;
+  font-size: 0.9rem;
+}
+
+/* Danger zone */
+.dangerZone {
+  margin-top: 3rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(239, 68, 68, 0.04);
+}
+
+.dangerLabel {
+  font-size: 0.82rem;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.btnDangerOutline {
+  padding: 0.4rem 1rem;
+  background: transparent;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  border-radius: 6px;
+  color: #fca5a5;
+  cursor: pointer;
+  font-size: 0.82rem;
+  transition: all 0.15s;
+}
+
+.btnDangerOutline:hover {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+/* Delete All Dialog */
+.dialogOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.dialog {
+  background: #1a1a2e;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  padding: 2rem;
+  max-width: 420px;
+  width: 90%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.dialogTitle {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0;
+  color: #fca5a5;
+}
+
+.dialogBody {
+  font-size: 0.875rem;
+  color: #aaa;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.dialogInput {
+  padding: 0.5rem 0.75rem;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.875rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.dialogActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.btnSecondary {
+  padding: 0.45rem 1rem;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  color: #aaa;
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: all 0.15s;
+}
+
+.btnSecondary:hover:not(:disabled) {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.btnDanger {
+  padding: 0.45rem 1rem;
+  background: rgba(239, 68, 68, 0.85);
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+
+.btnDanger:hover:not(:disabled) {
+  background: #ef4444;
+}
+
+.btnDanger:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.btnSecondary:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}

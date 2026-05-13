@@ -19,6 +19,22 @@ import time
 from datetime import datetime
 
 
+_SRGB_ICC_CACHE: Optional[bytes] = None
+
+def _get_srgb_icc() -> bytes:
+    """Return sRGB v2 ICC profile bytes via Pillow's built-in ImageCms. Cached after first call."""
+    global _SRGB_ICC_CACHE
+    if _SRGB_ICC_CACHE is not None:
+        return _SRGB_ICC_CACHE
+    try:
+        from PIL import ImageCms
+        _SRGB_ICC_CACHE = ImageCms.createProfile("sRGB").tobytes()
+    except Exception as e:
+        print(f"WARNING: Could not generate sRGB ICC profile: {e}", flush=True)
+        _SRGB_ICC_CACHE = b""
+    return _SRGB_ICC_CACHE
+
+
 def resize_image_for_web(image: Image.Image, max_dim: int = 1440) -> Image.Image:
     """Cap image dimensions for web display while preserving quality."""
     w, h = image.size
@@ -127,32 +143,57 @@ class LocalStorageProvider(StorageProvider):
         filename: Optional[str] = None,
         format: str = "JPEG",
         quality: int = 88,
+        print_mode: bool = False,
+        output_format: str = "jpeg",
+        dpi: Optional[tuple] = None,
     ) -> StorageResult:
         """Save image to local filesystem."""
         output_id = filename or f"{uuid.uuid4().hex}"
-        file_ext = "jpg" if format.upper() == "JPEG" else format.lower()
-        filepath = os.path.join(self.output_dir, f"{output_id}.{file_ext}")
-        
-        # Convert RGBA to RGB for JPEG (no transparency support)
-        save_image = image
-        if format.upper() == "JPEG" and image.mode == "RGBA":
-            bg = Image.new("RGB", image.size, (255, 255, 255))
-            bg.paste(image, mask=image.split()[3])
-            save_image = bg
-        
-        # Resize before saving to disk
-        save_image = resize_image_for_web(save_image)
 
-        # Save the image to disk
-        t = time.perf_counter()
-        if format.upper() == "JPEG":
-            save_image.save(filepath, format="JPEG", quality=quality, progressive=True)
-        elif format.upper() == "WEBP":
-            save_image.save(filepath, format="WEBP", quality=quality, method=4)
+        save_image = image
+
+        if print_mode:
+            # Print mode: no web resize, embed ICC + DPI metadata
+            icc = _get_srgb_icc()
+            if output_format == "png":
+                file_ext = "png"
+                t = time.perf_counter()
+                kwargs: dict = {"icc_profile": icc}
+                if dpi:
+                    kwargs["dpi"] = dpi
+                filepath = os.path.join(self.output_dir, f"{output_id}.{file_ext}")
+                save_image.save(filepath, format="PNG", **kwargs)
+            else:
+                # jpeg_print: flatten RGBA, quality 95
+                file_ext = "jpg"
+                if save_image.mode == "RGBA":
+                    bg = Image.new("RGB", save_image.size, (255, 255, 255))
+                    bg.paste(save_image, mask=save_image.split()[3])
+                    save_image = bg
+                t = time.perf_counter()
+                kwargs = {"quality": 95, "progressive": True, "icc_profile": icc}
+                if dpi:
+                    kwargs["dpi"] = dpi
+                filepath = os.path.join(self.output_dir, f"{output_id}.{file_ext}")
+                save_image.save(filepath, format="JPEG", **kwargs)
         else:
-            save_image.save(filepath, format=format)
+            file_ext = "jpg" if format.upper() == "JPEG" else format.lower()
+            filepath = os.path.join(self.output_dir, f"{output_id}.{file_ext}")
+            if format.upper() == "JPEG" and save_image.mode == "RGBA":
+                bg = Image.new("RGB", save_image.size, (255, 255, 255))
+                bg.paste(save_image, mask=save_image.split()[3])
+                save_image = bg
+            save_image = resize_image_for_web(save_image)
+            t = time.perf_counter()
+            if format.upper() == "JPEG":
+                save_image.save(filepath, format="JPEG", quality=quality, progressive=True)
+            elif format.upper() == "WEBP":
+                save_image.save(filepath, format="WEBP", quality=quality, method=4)
+            else:
+                save_image.save(filepath, format=format)
+
         print(f"PERF:     encode:  {time.perf_counter() - t:.2f}s ({file_ext}, {os.path.getsize(filepath) / 1024:.0f}KB)", flush=True)
-        
+
         return StorageResult(
             output_id=output_id,
             download_url=f"{self.base_url}/api/download/{output_id}",
@@ -256,32 +297,55 @@ class S3StorageProvider(StorageProvider):
         filename: Optional[str] = None,
         format: str = "JPEG",
         quality: int = 88,
+        print_mode: bool = False,
+        output_format: str = "jpeg",
+        dpi: Optional[tuple] = None,
     ):
         """Save image to LOCAL DISK first (instant), then upload to S3 in background.
         Returns (StorageResult, upload_coroutine)."""
         output_id = filename or f"{uuid.uuid4().hex}"
-        file_ext = "jpg" if format.upper() == "JPEG" else format.lower()
+
+        save_image = image
+
+        if print_mode:
+            icc = _get_srgb_icc()
+            if output_format == "png":
+                file_ext = "png"
+                if save_image.mode not in ("RGBA", "RGB"):
+                    save_image = save_image.convert("RGBA")
+                kwargs: dict = {"icc_profile": icc}
+                if dpi:
+                    kwargs["dpi"] = dpi
+            else:
+                file_ext = "jpg"
+                if save_image.mode == "RGBA":
+                    bg = Image.new("RGB", save_image.size, (255, 255, 255))
+                    bg.paste(save_image, mask=save_image.split()[3])
+                    save_image = bg
+                kwargs = {"quality": 95, "progressive": True, "icc_profile": icc}
+                if dpi:
+                    kwargs["dpi"] = dpi
+        else:
+            file_ext = "jpg" if format.upper() == "JPEG" else format.lower()
+            if format.upper() == "JPEG" and save_image.mode == "RGBA":
+                bg = Image.new("RGB", save_image.size, (255, 255, 255))
+                bg.paste(save_image, mask=save_image.split()[3])
+                save_image = bg
+            save_image = resize_image_for_web(save_image)
+            if format.upper() == "JPEG":
+                kwargs = {"quality": quality, "progressive": True}
+            elif format.upper() == "WEBP":
+                kwargs = {"quality": quality, "method": 4}
+            else:
+                kwargs = {}
+
         s3_key = f"{self.prefix}{output_id}.{file_ext}"
         local_path = os.path.join(self.local_output_dir, f"{output_id}.{file_ext}")
 
-        # Convert RGBA to RGB for JPEG (no transparency support)
-        save_image = image
-        if format.upper() == "JPEG" and image.mode == "RGBA":
-            bg = Image.new("RGB", image.size, (255, 255, 255))
-            bg.paste(image, mask=image.split()[3])
-            save_image = bg
-
-        # Resize before saving to disk
-        save_image = resize_image_for_web(save_image)
-
         # Save to LOCAL DISK first — this is instant and serves the user immediately
         t = time.perf_counter()
-        if format.upper() == "JPEG":
-            save_image.save(local_path, format="JPEG", quality=quality, progressive=True)
-        elif format.upper() == "WEBP":
-            save_image.save(local_path, format="WEBP", quality=quality, method=4)
-        else:
-            save_image.save(local_path, format=format)
+        fmt = "PNG" if file_ext == "png" else ("WEBP" if file_ext == "webp" else "JPEG")
+        save_image.save(local_path, format=fmt, **kwargs)
         file_size = os.path.getsize(local_path)
         print(f"PERF:     local_save: {time.perf_counter() - t:.2f}s ({file_ext}, {file_size / 1024:.0f}KB)", flush=True)
 
@@ -406,6 +470,9 @@ class StorageService:
         self,
         image: Image.Image,
         template_id: Optional[str] = None,
+        print_mode: bool = False,
+        output_format: str = "jpeg",
+        dpi: Optional[tuple] = None,
     ):
         """Save output but defer the actual upload. Returns (StorageResult, upload_coroutine).
         Only works with S3StorageProvider; falls back to normal save for local."""
@@ -413,10 +480,16 @@ class StorageService:
         output_id = f"{prefix}{uuid.uuid4().hex[:8]}"
 
         if hasattr(self.provider, 'save_image_deferred'):
-            return await self.provider.save_image_deferred(image, output_id)
+            return await self.provider.save_image_deferred(
+                image, output_id,
+                print_mode=print_mode, output_format=output_format, dpi=dpi,
+            )
         else:
-            # Local storage: just save normally, no background task needed
-            result = await self.provider.save_image(image, output_id)
+            # LocalStorageProvider: save normally with print params
+            result = await self.provider.save_image(
+                image, output_id,
+                print_mode=print_mode, output_format=output_format, dpi=dpi,
+            )
             async def _noop():
                 pass
             return result, _noop

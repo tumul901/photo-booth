@@ -1,57 +1,57 @@
 {
-  "template_id": "axis-bank",
-  "name": "axis-bank",
+  "template_id": "axl-mumbai",
+  "name": "axl-mumbai",
   "mode": "word_template",
   "base_image": "base.png",
   "dimensions": {
-    "width": 1081,
-    "height": 1920
+    "width": 577,
+    "height": 865
   },
   "slots": [
     {
       "id": "slot_0",
       "order": 0,
-      "x": 352,
-      "y": 91,
-      "width": 345,
-      "height": 84,
+      "x": 191,
+      "y": 4,
+      "width": 190,
+      "height": 68,
       "rotation": 0.0
     },
     {
       "id": "slot_1",
       "order": 1,
-      "x": 17,
-      "y": 667,
-      "width": 271,
-      "height": 72,
+      "x": 1,
+      "y": 231,
+      "width": 170,
+      "height": 59,
       "rotation": -6.0
     },
     {
       "id": "slot_2",
       "order": 2,
-      "x": 764,
-      "y": 490,
-      "width": 300,
-      "height": 73,
-      "rotation": 4.0
+      "x": 6,
+      "y": 467,
+      "width": 125,
+      "height": 57,
+      "rotation": -15.0
     },
     {
       "id": "slot_3",
       "order": 3,
-      "x": 19,
-      "y": 1118,
-      "width": 295,
-      "height": 80,
-      "rotation": -22.0
+      "x": 393,
+      "y": 390,
+      "width": 179,
+      "height": 61,
+      "rotation": 0.0
     },
     {
       "id": "slot_4",
       "order": 4,
-      "x": 768,
-      "y": 991,
-      "width": 298,
-      "height": 73,
-      "rotation": 4.0
+      "x": 345,
+      "y": 148,
+      "width": 183,
+      "height": 66,
+      "rotation": 9.0
     }
   ],
   "words": [
@@ -79,44 +79,29 @@
       "id": "freeflow",
       "label": "freeflow",
       "svg_filename": "freeflow.png"
+    },
+    {
+      "id": "limitless",
+      "label": "limitless",
+      "svg_filename": "limitless.png"
     }
   ],
   "bundles": [],
   "max_selections": 6,
   "allow_manual_positioning": true,
-  "created_at": "2026-04-22T11:59:15.317204+00:00",
-  "updated_at": "2026-05-12T13:05:25.906765+00:00",
+  "created_at": "2026-05-12T13:10:03.419952+00:00",
+  "updated_at": "2026-05-13T06:38:24.464859+00:00",
   "photo_slot": {
-    "x": 251,
-    "y": 276,
-    "width": 586,
-    "height": 1152,
-    "anchor_x": 0.4778456379857493,
-    "anchor_y": 0.11636757293613013,
+    "x": 3,
+    "y": 216,
+    "width": 571,
+    "height": 361,
+    "anchor_x": 0.5,
+    "anchor_y": 0.35,
     "anchor_mode": "none",
     "desired_face_ratio": 0.35,
     "min_zoom": 0.5,
     "max_zoom": 3.0,
     "sticker_filter": "none"
-  },
-  "name_text": {
-    "x": 60,
-    "y": 100,
-    "font_size": 60,
-    "color": "#000000",
-    "font_name": "",
-    "max_width": 0,
-    "align": "left",
-    "uppercase": false
-  },
-  "designation_text": {
-    "x": 60,
-    "y": 200,
-    "font_size": 60,
-    "color": "#000000",
-    "font_name": "",
-    "max_width": 0,
-    "align": "left",
-    "uppercase": false
   }
 }

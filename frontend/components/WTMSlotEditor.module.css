@@ -29,11 +29,17 @@
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
   cursor: crosshair; /* overridden per-canvas by inline style */
   user-select: none;
+  /* size to image content so the canvas pixel buffer matches the displayed image */
+  width: fit-content;
+  max-width: 100%;
+  justify-self: center;
 }
 
 .baseImage {
   display: block;
   max-width: 100%;
+  max-height: 70vh;
+  width: auto;
   height: auto;
   opacity: 0; /* Hidden but used for scaling math */
 }

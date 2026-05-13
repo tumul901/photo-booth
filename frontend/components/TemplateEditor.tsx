@@ -26,15 +26,22 @@ interface SlotConfig {
   anchorY: number;  // Relative anchor Y within slot (0-1)
 }
 
+interface FontItem {
+  name: string;
+  path: string;
+}
+
 interface TextConfig {
   x: number;
   y: number;
   fontSize: number;
   color: string;
   fontPath: string;
+  fontName: string;
   maxWidth: number;
   align: 'left' | 'center' | 'right';
   uppercase: boolean;
+  rotation: number;
 }
 
 const defaultTextConfig = (): TextConfig => ({
@@ -43,9 +50,11 @@ const defaultTextConfig = (): TextConfig => ({
   fontSize: 60,
   color: '#FFFFFF',
   fontPath: '',
+  fontName: '',
   maxWidth: 0,
   align: 'left',
   uppercase: false,
+  rotation: 0,
 });
 
 interface SnapGuide {
@@ -106,6 +115,11 @@ interface TemplateConfig {
   name_text?: TextConfig;
   designation_text?: TextConfig;
   fg_offset?: { x: number; y: number };
+  luggage_card_mode: boolean;
+  print_dpi: number;
+  print_width_mm: number;
+  print_height_mm: number;
+  output_format: string;
 }
 
 interface TemplateEditorProps {
@@ -166,11 +180,21 @@ export default function TemplateEditor({
   const [allowManualPositioning, setAllowManualPositioning] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
 
-  // Magazine text overlay configs
+  // Text overlay configs (magazine + sticker/luggage card)
   const [nameTextConfig, setNameTextConfig] = useState<TextConfig>(defaultTextConfig());
   const [designationTextConfig, setDesignationTextConfig] = useState<TextConfig>({ ...defaultTextConfig(), y: 180, fontSize: 40 });
   const [hasNameText, setHasNameText] = useState(false);
   const [hasDesignationText, setHasDesignationText] = useState(false);
+
+  // Custom fonts
+  const [fonts, setFonts] = useState<FontItem[]>([]);
+
+  // Luggage card printing mode
+  const [luggageCardMode, setLuggageCardMode] = useState(false);
+  const [printDpi, setPrintDpi] = useState<300 | 600>(300);
+  const [printWidthMm, setPrintWidthMm] = useState(86.0);
+  const [printHeightMm, setPrintHeightMm] = useState(54.0);
+  const [outputFormat, setOutputFormat] = useState<'png' | 'jpeg_print'>('png');
 
   // Dragging state for text markers
   const [draggingText, setDraggingText] = useState<'name' | 'designation' | null>(null);
@@ -180,6 +204,14 @@ export default function TemplateEditor({
   const [isDraggingFg, setIsDraggingFg] = useState(false);
   const [activeGuides, setActiveGuides] = useState<SnapGuide[]>([]);
   const fgDragAnchorRef = useRef<{ mouseX: number; mouseY: number; startX: number; startY: number } | null>(null);
+
+  // Load available custom fonts
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/api/admin/fonts`)
+      .then(r => r.json())
+      .then(d => setFonts(d.fonts ?? []))
+      .catch(() => {});
+  }, []);
 
   // Load FG image whenever compositeMode becomes 'magazine'
   useEffect(() => {
@@ -221,33 +253,44 @@ export default function TemplateEditor({
           setFgOffset({ x: config.fg_offset.x || 0, y: config.fg_offset.y || 0 });
         }
 
-        // Load magazine text configs
-        if (config.name_text && typeof config.name_text === 'object') {
+        // Load text overlay configs (magazine + sticker/luggage card)
+        if (config.name_text && typeof config.name_text === 'object' && Object.keys(config.name_text).length > 0) {
           setNameTextConfig({
             x: config.name_text.x ?? 100,
             y: config.name_text.y ?? 100,
             fontSize: config.name_text.fontSize ?? 60,
             color: config.name_text.color ?? '#FFFFFF',
             fontPath: config.name_text.fontPath ?? '',
+            fontName: config.name_text.fontName ?? '',
             maxWidth: config.name_text.maxWidth ?? 0,
             align: config.name_text.align ?? 'left',
             uppercase: config.name_text.uppercase ?? false,
+            rotation: config.name_text.rotation ?? 0,
           });
           setHasNameText(true);
         }
-        if (config.designation_text && typeof config.designation_text === 'object') {
+        if (config.designation_text && typeof config.designation_text === 'object' && Object.keys(config.designation_text).length > 0) {
           setDesignationTextConfig({
             x: config.designation_text.x ?? 100,
             y: config.designation_text.y ?? 180,
             fontSize: config.designation_text.fontSize ?? 40,
             color: config.designation_text.color ?? '#FFFFFF',
             fontPath: config.designation_text.fontPath ?? '',
+            fontName: config.designation_text.fontName ?? '',
             maxWidth: config.designation_text.maxWidth ?? 0,
             align: config.designation_text.align ?? 'left',
             uppercase: config.designation_text.uppercase ?? false,
+            rotation: config.designation_text.rotation ?? 0,
           });
           setHasDesignationText(true);
         }
+
+        // Load luggage card settings
+        if (typeof config.luggage_card_mode === 'boolean') setLuggageCardMode(config.luggage_card_mode);
+        if (config.print_dpi === 300 || config.print_dpi === 600) setPrintDpi(config.print_dpi);
+        if (config.print_width_mm) setPrintWidthMm(config.print_width_mm);
+        if (config.print_height_mm) setPrintHeightMm(config.print_height_mm);
+        if (config.output_format) setOutputFormat(config.output_format as 'png' | 'jpeg_print');
 
         // Convert slots from backend format to editor format
         if (config.slots && config.slots.length > 0) {
@@ -297,6 +340,22 @@ export default function TemplateEditor({
     
     loadExistingConfig();
   }, [templateId]);
+
+  // Sync canvas dimensions to print size when luggage card mode is on.
+  // Without this, the template image's native dims override the saved print size
+  // on initial load (race between image-load and config-load effects).
+  useEffect(() => {
+    if (!configLoaded) return;
+    if (luggageCardMode) {
+      const w = Math.round((printWidthMm / 25.4) * printDpi);
+      const h = Math.round((printHeightMm / 25.4) * printDpi);
+      setImageDimensions(prev => (prev.width === w && prev.height === h ? prev : { width: w, height: h }));
+    } else if (imageRef.current) {
+      const w = imageRef.current.width;
+      const h = imageRef.current.height;
+      setImageDimensions(prev => (prev.width === w && prev.height === h ? prev : { width: w, height: h }));
+    }
+  }, [configLoaded, luggageCardMode, printWidthMm, printHeightMm, printDpi, imageLoaded]);
 
   // Load template image
   useEffect(() => {
@@ -427,48 +486,82 @@ export default function TemplateEditor({
       ctx.restore();
     }
 
-    // Draw magazine text position indicators
-    if (compositeMode === 'magazine') {
+    // Draw text overlay position indicators (any composite mode when overlays are enabled)
+    if (hasNameText || hasDesignationText) {
       const drawTextMarker = (cfg: TextConfig, label: string, color: string, isDragging: boolean) => {
         const tx = cfg.x * scale;
         const ty = cfg.y * scale;
         ctx.save();
+        ctx.translate(tx, ty);
+        // Show rotation direction visually
+        if (cfg.rotation !== 0) {
+          const rad = -cfg.rotation * Math.PI / 180; // canvas CW = PIL CCW
+          ctx.rotate(rad);
+        }
         ctx.strokeStyle = color;
         ctx.fillStyle = color;
         ctx.lineWidth = isDragging ? 3 : 2;
         ctx.globalAlpha = isDragging ? 1 : 0.85;
         ctx.setLineDash([4, 4]);
-        // Horizontal guide line
         ctx.beginPath();
-        ctx.moveTo(tx - 10, ty);
-        ctx.lineTo(tx + 120, ty);
+        ctx.moveTo(-10, 0);
+        ctx.lineTo(120, 0);
         ctx.stroke();
         ctx.setLineDash([]);
-        // Vertical tick
         ctx.beginPath();
-        ctx.moveTo(tx, ty - 8);
-        ctx.lineTo(tx, ty + 8);
+        ctx.moveTo(0, -8);
+        ctx.lineTo(0, 8);
         ctx.stroke();
-        // Drag handle circle
         ctx.beginPath();
-        ctx.arc(tx, ty, isDragging ? 7 : 5, 0, Math.PI * 2);
-        ctx.fillStyle = color;
+        ctx.arc(0, 0, isDragging ? 7 : 5, 0, Math.PI * 2);
         ctx.fill();
-        // Label with background pill
         const fontSize = Math.max(11, 13 * scale);
         ctx.font = `bold ${fontSize}px sans-serif`;
         const textW = ctx.measureText(label).width;
         ctx.fillStyle = 'rgba(0,0,0,0.55)';
         ctx.beginPath();
-        ctx.roundRect(tx + 10, ty - fontSize - 2, textW + 8, fontSize + 4, 3);
+        ctx.roundRect(10, -fontSize - 2, textW + 8, fontSize + 4, 3);
         ctx.fill();
         ctx.fillStyle = color;
-        ctx.fillText(label, tx + 14, ty - 4);
+        ctx.fillText(label, 14, -4);
+        if (cfg.rotation !== 0) {
+          ctx.fillStyle = color;
+          ctx.font = `${Math.max(9, 10 * scale)}px sans-serif`;
+          ctx.fillText(`${cfg.rotation.toFixed(0)}°`, 14, fontSize + 2);
+        }
         ctx.globalAlpha = 1;
         ctx.restore();
       };
       if (hasNameText) drawTextMarker(nameTextConfig, 'NAME', '#facc15', draggingText === 'name');
       if (hasDesignationText) drawTextMarker(designationTextConfig, 'DESIGNATION', '#4ade80', draggingText === 'designation');
+    }
+
+    // Ruler overlay for luggage card mode
+    if (luggageCardMode && imageDimensions.width > 0) {
+      const mmPerPx = printWidthMm / imageDimensions.width;
+      const pxPer10mm = (10 / mmPerPx) * scale;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(100,180,255,0.35)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      for (let xmm = 10; xmm < printWidthMm; xmm += 10) {
+        const xpx = (xmm / printWidthMm) * canvas.width;
+        ctx.beginPath(); ctx.moveTo(xpx, 0); ctx.lineTo(xpx, canvas.height); ctx.stroke();
+      }
+      for (let ymm = 10; ymm < printHeightMm; ymm += 10) {
+        const ypx = (ymm / printHeightMm) * canvas.height;
+        ctx.beginPath(); ctx.moveTo(0, ypx); ctx.lineTo(canvas.width, ypx); ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      // mm labels along top
+      ctx.fillStyle = 'rgba(100,180,255,0.7)';
+      ctx.font = `${Math.max(8, 9 * scale)}px sans-serif`;
+      for (let xmm = 10; xmm < printWidthMm; xmm += 10) {
+        const xpx = (xmm / printWidthMm) * canvas.width;
+        ctx.fillText(`${xmm}`, xpx + 2, 10 * scale);
+      }
+      ctx.restore();
+      void pxPer10mm; // suppress unused warning
     }
 
     // Draw current drawing rectangle
@@ -484,7 +577,7 @@ export default function TemplateEditor({
       ctx.strokeRect(x, y, w, h);
       ctx.setLineDash([]);
     }
-  }, [imageLoaded, imageDimensions, scale, slots, selectedSlotIndex, isDrawing, mode, drawStart, drawCurrent, fgImageRef, showFgOverlay, compositeMode, hasNameText, nameTextConfig, hasDesignationText, designationTextConfig, draggingText, fgOffset, activeGuides]);
+  }, [imageLoaded, imageDimensions, scale, slots, selectedSlotIndex, isDrawing, mode, drawStart, drawCurrent, fgImageRef, showFgOverlay, compositeMode, hasNameText, nameTextConfig, hasDesignationText, designationTextConfig, draggingText, fgOffset, activeGuides, luggageCardMode, printWidthMm, printHeightMm]);
 
   // Redraw on state changes
   useEffect(() => {
@@ -525,8 +618,8 @@ export default function TemplateEditor({
       return;
     }
 
-    // Check for text marker drag (works in any non-fg mode when magazine)
-    if (compositeMode === 'magazine') {
+    // Check for text marker drag (works whenever overlays are enabled)
+    if (hasNameText || hasDesignationText) {
       const hit = hitTestTextMarker(coords.x, coords.y);
       if (hit) {
         setDraggingText(hit);
@@ -576,8 +669,24 @@ export default function TemplateEditor({
     }
 
     if (draggingText) {
-      const nx = Math.round(Math.max(0, coords.x));
-      const ny = Math.round(Math.max(0, coords.y));
+      const rawX = Math.max(0, coords.x);
+      const rawY = Math.max(0, coords.y);
+      // Snap to grid (canvas edges/thirds/center) + snap to the OTHER text marker
+      const otherCfg = draggingText === 'name' ? designationTextConfig : nameTextConfig;
+      const otherEnabled = draggingText === 'name' ? hasDesignationText : hasNameText;
+      const { snappedX, snappedY, guides } = computeSnap(
+        rawX, rawY, 1, 1, imageDimensions.width, imageDimensions.height,
+      );
+      // Also check cross-marker snap
+      let finalX = snappedX, finalY = snappedY;
+      const crossGuides: SnapGuide[] = [...guides];
+      if (otherEnabled) {
+        if (Math.abs(rawX - otherCfg.x) < 12) { finalX = otherCfg.x; crossGuides.push({ axis: 'x', position: otherCfg.x }); }
+        if (Math.abs(rawY - otherCfg.y) < 12) { finalY = otherCfg.y; crossGuides.push({ axis: 'y', position: otherCfg.y }); }
+      }
+      setActiveGuides(crossGuides);
+      const nx = Math.round(finalX);
+      const ny = Math.round(finalY);
       if (draggingText === 'name') setNameTextConfig(p => ({ ...p, x: nx, y: ny }));
       else setDesignationTextConfig(p => ({ ...p, x: nx, y: ny }));
       return;
@@ -598,6 +707,7 @@ export default function TemplateEditor({
 
     if (draggingText) {
       setDraggingText(null);
+      setActiveGuides([]);
       return;
     }
 
@@ -671,6 +781,11 @@ export default function TemplateEditor({
       fg_offset: fgOffset,
       name_text: hasNameText ? nameTextConfig : undefined,
       designation_text: hasDesignationText ? designationTextConfig : undefined,
+      luggage_card_mode: luggageCardMode,
+      print_dpi: printDpi,
+      print_width_mm: printWidthMm,
+      print_height_mm: printHeightMm,
+      output_format: outputFormat,
     };
 
     onSave(config);
@@ -798,6 +913,112 @@ export default function TemplateEditor({
         <div className={styles.settingsPanel}>
           <h3 className={styles.settingsTitle}>Template Settings</h3>
           
+          {/* Luggage Card Printing Mode */}
+          <div className={styles.settingRow} style={{ background: 'rgba(251,191,36,0.08)', borderRadius: 8, padding: '10px 12px', marginBottom: 8 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600 }}>
+              <input
+                type="checkbox"
+                checked={luggageCardMode}
+                onChange={e => {
+                  const on = e.target.checked;
+                  setLuggageCardMode(on);
+                  if (on) {
+                    // Force composite mode to background and lock dimensions to print size
+                    setCompositeMode('background');
+                    setTemplateType('sticker');
+                    const w = Math.round(printWidthMm / 25.4 * printDpi);
+                    const h = Math.round(printHeightMm / 25.4 * printDpi);
+                    setImageDimensions({ width: w, height: h });
+                  }
+                }}
+                style={{ width: 16, height: 16 }}
+              />
+              🪪 Luggage Card Printing Mode
+            </label>
+            {luggageCardMode && (
+              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div className={styles.settingRow}>
+                  <label>Card size (mm):</label>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input type="number" value={printWidthMm} step="0.1"
+                      onChange={e => {
+                        const v = parseFloat(e.target.value) || 86;
+                        setPrintWidthMm(v);
+                        setImageDimensions(prev => ({ ...prev, width: Math.round(v / 25.4 * printDpi) }));
+                      }}
+                      style={{ width: 56 }} />
+                    <span>×</span>
+                    <input type="number" value={printHeightMm} step="0.1"
+                      onChange={e => {
+                        const v = parseFloat(e.target.value) || 54;
+                        setPrintHeightMm(v);
+                        setImageDimensions(prev => ({ ...prev, height: Math.round(v / 25.4 * printDpi) }));
+                      }}
+                      style={{ width: 56 }} />
+                    <span>mm</span>
+                    <button className={styles.toolButton} style={{ fontSize: '0.75rem' }}
+                      onClick={() => { setPrintWidthMm(86); setPrintHeightMm(54); setImageDimensions({ width: Math.round(86 / 25.4 * printDpi), height: Math.round(54 / 25.4 * printDpi) }); }}>
+                      CR80
+                    </button>
+                    <button className={styles.toolButton} style={{ fontSize: '1rem', padding: '2px 6px' }}
+                      title="Swap portrait / landscape"
+                      onClick={() => {
+                        const newW = printHeightMm;
+                        const newH = printWidthMm;
+                        setPrintWidthMm(newW);
+                        setPrintHeightMm(newH);
+                        setImageDimensions({
+                          width: Math.round(newW / 25.4 * printDpi),
+                          height: Math.round(newH / 25.4 * printDpi),
+                        });
+                      }}>
+                      ↻
+                    </button>
+                  </div>
+                </div>
+                <div className={styles.settingRow}>
+                  <label>DPI:</label>
+                  <div style={{ display: 'flex', gap: 12 }}>
+                    {([300, 600] as const).map(d => (
+                      <label key={d} style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                        <input type="radio" name="printDpi" value={d} checked={printDpi === d}
+                          onChange={() => {
+                            const factor = d / printDpi;
+                            setPrintDpi(d);
+                            const newW = Math.round(printWidthMm / 25.4 * d);
+                            const newH = Math.round(printHeightMm / 25.4 * d);
+                            setImageDimensions({ width: newW, height: newH });
+                            // Scale all overlay positions
+                            setNameTextConfig(p => ({ ...p, x: Math.round(p.x * factor), y: Math.round(p.y * factor), fontSize: Math.round(p.fontSize * factor), maxWidth: p.maxWidth ? Math.round(p.maxWidth * factor) : 0 }));
+                            setDesignationTextConfig(p => ({ ...p, x: Math.round(p.x * factor), y: Math.round(p.y * factor), fontSize: Math.round(p.fontSize * factor), maxWidth: p.maxWidth ? Math.round(p.maxWidth * factor) : 0 }));
+                            setSlots(prev => prev.map(s => ({ ...s, x: Math.round(s.x * factor), y: Math.round(s.y * factor), width: Math.round(s.width * factor), height: Math.round(s.height * factor) })));
+                          }} />
+                        {d} DPI
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div className={styles.settingRow}>
+                  <label>Canvas (locked):</label>
+                  <span style={{ fontFamily: 'monospace', color: '#a3e635' }}>
+                    {imageDimensions.width} × {imageDimensions.height} px
+                  </span>
+                </div>
+                <div className={styles.settingRow}>
+                  <label>Output format:</label>
+                  <div style={{ display: 'flex', gap: 12 }}>
+                    {(['png', 'jpeg_print'] as const).map(f => (
+                      <label key={f} style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                        <input type="radio" name="outputFormat" value={f} checked={outputFormat === f} onChange={() => setOutputFormat(f)} />
+                        {f === 'png' ? 'PNG (lossless)' : 'JPEG q95'}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className={styles.settingRow}>
             <label>Template Type:</label>
             <select value={templateType} onChange={e => setTemplateType(e.target.value as typeof templateType)}>
@@ -817,114 +1038,109 @@ export default function TemplateEditor({
           </div>
 
           {compositeMode === 'magazine' && (
-            <>
-              <div className={styles.settingRow} style={{ background: 'rgba(99,102,241,0.1)', borderRadius: 6, padding: '8px 10px' }}>
-                <span style={{ fontSize: '0.78rem', color: '#a5b4fc' }}>
-                  📰 Magazine mode: the BG image (uploaded at creation) goes behind the user. Upload the FG overlay (title, text, borders) via the Magazine tab after saving.
-                </span>
-              </div>
-
-              {/* Name text config */}
-              <div className={styles.settingRow} style={{ marginTop: '1rem' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                  <input type="checkbox" checked={hasNameText} onChange={e => setHasNameText(e.target.checked)} style={{ width: 16, height: 16 }} />
-                  <strong>Name Text</strong>
-                </label>
-              </div>
-              {hasNameText && (
-                <div style={{ paddingLeft: 12, borderLeft: '2px solid #facc15', marginBottom: 8 }}>
-                  <div className={styles.settingRow}>
-                    <label>Position (X, Y):</label>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <input type="number" value={nameTextConfig.x} onChange={e => setNameTextConfig(p => ({ ...p, x: +e.target.value }))} style={{ width: 70 }} />
-                      <input type="number" value={nameTextConfig.y} onChange={e => setNameTextConfig(p => ({ ...p, y: +e.target.value }))} style={{ width: 70 }} />
-                    </div>
-                  </div>
-                  <div className={styles.settingRow}>
-                    <label>Font Size:</label>
-                    <input type="number" value={nameTextConfig.fontSize} onChange={e => setNameTextConfig(p => ({ ...p, fontSize: +e.target.value }))} style={{ width: 70 }} />
-                  </div>
-                  <div className={styles.settingRow}>
-                    <label>Color:</label>
-                    <input type="color" value={nameTextConfig.color} onChange={e => setNameTextConfig(p => ({ ...p, color: e.target.value }))} />
-                    <input type="text" value={nameTextConfig.color} onChange={e => setNameTextConfig(p => ({ ...p, color: e.target.value }))} style={{ width: 80 }} />
-                  </div>
-                  <div className={styles.settingRow}>
-                    <label>Max Width (0=none):</label>
-                    <input type="number" value={nameTextConfig.maxWidth} onChange={e => setNameTextConfig(p => ({ ...p, maxWidth: +e.target.value }))} style={{ width: 80 }} />
-                  </div>
-                  <div className={styles.settingRow}>
-                    <label>Align:</label>
-                    <select value={nameTextConfig.align} onChange={e => setNameTextConfig(p => ({ ...p, align: e.target.value as 'left' | 'center' | 'right' }))}>
-                      <option value="left">Left</option>
-                      <option value="center">Center</option>
-                      <option value="right">Right</option>
-                    </select>
-                  </div>
-                  <div className={styles.settingRow}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                      <input type="checkbox" checked={nameTextConfig.uppercase} onChange={e => setNameTextConfig(p => ({ ...p, uppercase: e.target.checked }))} />
-                      Uppercase
-                    </label>
-                  </div>
-                  <div className={styles.settingRow}>
-                    <label>Font Path (optional):</label>
-                    <input type="text" value={nameTextConfig.fontPath} onChange={e => setNameTextConfig(p => ({ ...p, fontPath: e.target.value }))} placeholder="/app/fonts/MyFont.ttf" style={{ width: '100%' }} />
-                  </div>
-                </div>
-              )}
-
-              {/* Designation text config */}
-              <div className={styles.settingRow} style={{ marginTop: '0.5rem' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                  <input type="checkbox" checked={hasDesignationText} onChange={e => setHasDesignationText(e.target.checked)} style={{ width: 16, height: 16 }} />
-                  <strong>Designation Text</strong>
-                </label>
-              </div>
-              {hasDesignationText && (
-                <div style={{ paddingLeft: 12, borderLeft: '2px solid #4ade80', marginBottom: 8 }}>
-                  <div className={styles.settingRow}>
-                    <label>Position (X, Y):</label>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <input type="number" value={designationTextConfig.x} onChange={e => setDesignationTextConfig(p => ({ ...p, x: +e.target.value }))} style={{ width: 70 }} />
-                      <input type="number" value={designationTextConfig.y} onChange={e => setDesignationTextConfig(p => ({ ...p, y: +e.target.value }))} style={{ width: 70 }} />
-                    </div>
-                  </div>
-                  <div className={styles.settingRow}>
-                    <label>Font Size:</label>
-                    <input type="number" value={designationTextConfig.fontSize} onChange={e => setDesignationTextConfig(p => ({ ...p, fontSize: +e.target.value }))} style={{ width: 70 }} />
-                  </div>
-                  <div className={styles.settingRow}>
-                    <label>Color:</label>
-                    <input type="color" value={designationTextConfig.color} onChange={e => setDesignationTextConfig(p => ({ ...p, color: e.target.value }))} />
-                    <input type="text" value={designationTextConfig.color} onChange={e => setDesignationTextConfig(p => ({ ...p, color: e.target.value }))} style={{ width: 80 }} />
-                  </div>
-                  <div className={styles.settingRow}>
-                    <label>Max Width (0=none):</label>
-                    <input type="number" value={designationTextConfig.maxWidth} onChange={e => setDesignationTextConfig(p => ({ ...p, maxWidth: +e.target.value }))} style={{ width: 80 }} />
-                  </div>
-                  <div className={styles.settingRow}>
-                    <label>Align:</label>
-                    <select value={designationTextConfig.align} onChange={e => setDesignationTextConfig(p => ({ ...p, align: e.target.value as 'left' | 'center' | 'right' }))}>
-                      <option value="left">Left</option>
-                      <option value="center">Center</option>
-                      <option value="right">Right</option>
-                    </select>
-                  </div>
-                  <div className={styles.settingRow}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                      <input type="checkbox" checked={designationTextConfig.uppercase} onChange={e => setDesignationTextConfig(p => ({ ...p, uppercase: e.target.checked }))} />
-                      Uppercase
-                    </label>
-                  </div>
-                  <div className={styles.settingRow}>
-                    <label>Font Path (optional):</label>
-                    <input type="text" value={designationTextConfig.fontPath} onChange={e => setDesignationTextConfig(p => ({ ...p, fontPath: e.target.value }))} placeholder="/app/fonts/MyFont.ttf" style={{ width: '100%' }} />
-                  </div>
-                </div>
-              )}
-            </>
+            <div className={styles.settingRow} style={{ background: 'rgba(99,102,241,0.1)', borderRadius: 6, padding: '8px 10px' }}>
+              <span style={{ fontSize: '0.78rem', color: '#a5b4fc' }}>
+                📰 Magazine mode: the BG image goes behind the user. Upload the FG overlay via the Magazine tab after saving.
+              </span>
+            </div>
           )}
+
+          {/* Text Overlays — available for all template types */}
+          <h3 className={styles.settingsTitle} style={{ marginTop: '1rem' }}>Text Overlays</h3>
+          <p className={styles.hint} style={{ marginBottom: 8 }}>
+            Drag the markers on the canvas to position. Hold Shift while dragging to disable snap.
+          </p>
+
+          {/* Helper to render one text overlay section */}
+          {(() => {
+            const renderOverlay = (
+              label: string,
+              accentColor: string,
+              enabled: boolean,
+              setEnabled: (v: boolean) => void,
+              cfg: TextConfig,
+              setCfg: (v: TextConfig) => void,
+            ) => (
+              <div style={{ marginBottom: 8 }}>
+                <div className={styles.settingRow}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} style={{ width: 16, height: 16 }} />
+                    <strong style={{ color: accentColor }}>{label}</strong>
+                  </label>
+                </div>
+                {enabled && (
+                  <div style={{ paddingLeft: 12, borderLeft: `2px solid ${accentColor}`, marginBottom: 8 }}>
+                    <div className={styles.settingRow}>
+                      <label>Position (X, Y) — drag on canvas:</label>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <input type="number" value={cfg.x} onChange={e => setCfg({ ...cfg, x: +e.target.value })} style={{ width: 70 }} />
+                        <input type="number" value={cfg.y} onChange={e => setCfg({ ...cfg, y: +e.target.value })} style={{ width: 70 }} />
+                      </div>
+                    </div>
+                    <div className={styles.settingRow}>
+                      <label>Rotation (°):</label>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <input type="range" min={-180} max={180} step={1} value={cfg.rotation}
+                          onChange={e => setCfg({ ...cfg, rotation: +e.target.value })} style={{ width: 120 }} />
+                        <input type="number" value={cfg.rotation} min={-180} max={180}
+                          onChange={e => setCfg({ ...cfg, rotation: Math.max(-180, Math.min(180, +e.target.value)) })} style={{ width: 60 }} />
+                        <span>°</span>
+                        {cfg.rotation !== 0 && (
+                          <button onClick={() => setCfg({ ...cfg, rotation: 0 })} style={{ fontSize: '0.7rem', padding: '2px 6px' }}>Reset</button>
+                        )}
+                      </div>
+                    </div>
+                    <div className={styles.settingRow}>
+                      <label>Font Size:</label>
+                      <input type="number" value={cfg.fontSize} onChange={e => setCfg({ ...cfg, fontSize: +e.target.value })} style={{ width: 70 }} />
+                    </div>
+                    <div className={styles.settingRow}>
+                      <label>Color:</label>
+                      <input type="color" value={cfg.color} onChange={e => setCfg({ ...cfg, color: e.target.value })} />
+                      <input type="text" value={cfg.color} onChange={e => setCfg({ ...cfg, color: e.target.value })} style={{ width: 80 }} />
+                    </div>
+                    <div className={styles.settingRow}>
+                      <label>Font:</label>
+                      <select value={cfg.fontName} onChange={e => setCfg({ ...cfg, fontName: e.target.value, fontPath: '' })}>
+                        <option value="">Default</option>
+                        {fonts.map(f => <option key={f.name} value={f.name}>{f.name}</option>)}
+                      </select>
+                    </div>
+                    {!cfg.fontName && (
+                      <div className={styles.settingRow}>
+                        <label>Font Path (advanced):</label>
+                        <input type="text" value={cfg.fontPath} onChange={e => setCfg({ ...cfg, fontPath: e.target.value })} placeholder="/app/fonts/MyFont.ttf" style={{ width: '100%' }} />
+                      </div>
+                    )}
+                    <div className={styles.settingRow}>
+                      <label>Max Width (0=none):</label>
+                      <input type="number" value={cfg.maxWidth} onChange={e => setCfg({ ...cfg, maxWidth: +e.target.value })} style={{ width: 80 }} />
+                    </div>
+                    <div className={styles.settingRow}>
+                      <label>Align:</label>
+                      <select value={cfg.align} onChange={e => setCfg({ ...cfg, align: e.target.value as 'left' | 'center' | 'right' })}>
+                        <option value="left">Left</option>
+                        <option value="center">Center</option>
+                        <option value="right">Right</option>
+                      </select>
+                    </div>
+                    <div className={styles.settingRow}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                        <input type="checkbox" checked={cfg.uppercase} onChange={e => setCfg({ ...cfg, uppercase: e.target.checked })} />
+                        Uppercase
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+            return (
+              <>
+                {renderOverlay('Name Text', '#facc15', hasNameText, setHasNameText, nameTextConfig, setNameTextConfig)}
+                {renderOverlay('Designation Text', '#4ade80', hasDesignationText, setHasDesignationText, designationTextConfig, setDesignationTextConfig)}
+              </>
+            );
+          })()}
           
           <div className={styles.settingRow}>
             <label>Image Filter:</label>

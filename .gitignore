@@ -35,8 +35,10 @@ npm-debug.log*
 # rembg model cache
 .u2net/
 
-# Stats data
+# Runtime data (generated at runtime, not source-controlled)
 backend/data/stats.json
+backend/data/archived.json
+backend/data/feature_flags.json
 
 # Markdown files (noisy docs)
 *.md

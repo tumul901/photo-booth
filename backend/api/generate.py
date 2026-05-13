@@ -56,8 +56,10 @@ async def generate_composite(
     slot_assignments: Optional[str] = Form(None),
     processing_mode: str = Form("sticker"),  # "sticker", "frame", "pre_extracted"
     photo_position: Optional[str] = Form(None),  # JSON: {"x", "y", "scale", "editorWidth"}
-    magazine_name: str = Form(""),           # NEW — person's name for magazine mode
-    magazine_designation: str = Form(""),    # NEW — person's designation for magazine mode
+    magazine_name: str = Form(""),           # Magazine mode: person's name
+    magazine_designation: str = Form(""),    # Magazine mode: person's designation
+    overlay_name: str = Form(""),            # Sticker/luggage card: person's name
+    overlay_designation: str = Form(""),     # Sticker/luggage card: person's designation
 ):
     """
     Generate a composited photo from uploaded image(s) and a template.
@@ -196,15 +198,23 @@ async def generate_composite(
             processing_mode=processing_mode,
             user_position=user_position,
             fg_template_path=fg_template_path,
-            magazine_name=magazine_name,            # NEW
-            magazine_designation=magazine_designation,  # NEW
+            magazine_name=magazine_name,
+            magazine_designation=magazine_designation,
+            overlay_name=overlay_name,
+            overlay_designation=overlay_designation,
         )
         print(f"PERF:   compose:   {time.perf_counter() - t_step:.2f}s", flush=True)
         
         # Save via StorageService — encode immediately, defer S3 upload
         t_step = time.perf_counter()
         import asyncio
-        result, upload_fn = await storage_service.save_output_deferred(final_image, template_id=template_id)
+        result, upload_fn = await storage_service.save_output_deferred(
+            final_image,
+            template_id=template_id,
+            print_mode=template_meta.luggage_card_mode,
+            output_format=template_meta.output_format,
+            dpi=(template_meta.print_dpi, template_meta.print_dpi) if template_meta.luggage_card_mode else None,
+        )
         print(f"PERF:   encode:    {time.perf_counter() - t_step:.2f}s", flush=True)
         
         # Fire off S3 upload in background — user doesn't wait for it

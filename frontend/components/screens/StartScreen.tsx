@@ -3,19 +3,83 @@
 /**
  * ModeSelectScreen Component (Step 1)
  * ====================================
- * Two large cards for selecting the processing mode:
- *   - Frame: Overlay photo onto template
- *   - Remove BG: Remove background, composite onto template
+ * Mode cards driven by /api/feature-flags. A mode is hidden if its toggle is
+ * off in the admin panel. While the flags are loading we render nothing (no
+ * flicker) — the request is cheap and usually returns in <100 ms.
  */
 
 import Image from 'next/image';
+import { useEffect, useState } from 'react';
 import styles from './StartScreen.module.css';
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+type Mode = 'frame' | 'sticker' | 'word_template' | 'magazine';
+
 interface ModeSelectScreenProps {
-  onSelectMode: (mode: 'frame' | 'sticker' | 'word_template' | 'magazine') => void;
+  onSelectMode: (mode: Mode) => void;
 }
 
+interface FeatureFlags {
+  modes: Record<Mode, boolean>;
+  rembg_profile: string;
+}
+
+const MODE_CARDS: Array<{ key: Mode; icon: string; title: string; desc: string }> = [
+  {
+    key: 'frame',
+    icon: '🖼️',
+    title: 'Frame Mode',
+    desc: 'Overlay your photo onto a beautiful template frame',
+  },
+  {
+    key: 'sticker',
+    icon: '✂️',
+    title: 'Remove Background',
+    desc: 'Cut out your background and place onto a template',
+  },
+  {
+    key: 'word_template',
+    icon: '🔤',
+    title: 'Word Template',
+    desc: 'Choose words that appear on your doodle template',
+  },
+  {
+    key: 'magazine',
+    icon: '📰',
+    title: 'Magazine Cover',
+    desc: 'Become the cover star of your own magazine',
+  },
+];
+
 export default function ModeSelectScreen({ onSelectMode }: ModeSelectScreenProps) {
+  const [flags, setFlags] = useState<FeatureFlags | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch(`${API_BASE_URL}/api/feature-flags`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: FeatureFlags | null) => {
+        if (active && data) setFlags(data);
+      })
+      .catch(() => {
+        // On network failure, fail open — show all four cards rather than locking the booth.
+        if (active) {
+          setFlags({
+            modes: { frame: true, sticker: true, word_template: true, magazine: true },
+            rembg_profile: 'isnet_hi',
+          });
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const visibleCards = flags
+    ? MODE_CARDS.filter((c) => flags.modes[c.key] !== false)
+    : [];
+
   return (
     <div className={styles.container}>
       <div className={styles.content}>
@@ -33,49 +97,17 @@ export default function ModeSelectScreen({ onSelectMode }: ModeSelectScreenProps
         <p className={styles.subtitle}>Choose your style</p>
 
         <div className={styles.modeCards}>
-          <button
-            className={styles.modeCard}
-            onClick={() => onSelectMode('frame')}
-          >
-            <span className={styles.modeIcon}>🖼️</span>
-            <span className={styles.modeTitle}>Frame Mode</span>
-            <span className={styles.modeDesc}>
-              Overlay your photo onto a beautiful template frame
-            </span>
-          </button>
-
-          <button
-            className={styles.modeCard}
-            onClick={() => onSelectMode('sticker')}
-          >
-            <span className={styles.modeIcon}>✂️</span>
-            <span className={styles.modeTitle}>Remove Background</span>
-            <span className={styles.modeDesc}>
-              Cut out your background and place onto a template
-            </span>
-          </button>
-
-          <button
-            className={styles.modeCard}
-            onClick={() => onSelectMode('word_template')}
-          >
-            <span className={styles.modeIcon}>🔤</span>
-            <span className={styles.modeTitle}>Word Template</span>
-            <span className={styles.modeDesc}>
-              Choose words that appear on your doodle template
-            </span>
-          </button>
-
-          <button
-            className={styles.modeCard}
-            onClick={() => onSelectMode('magazine')}
-          >
-            <span className={styles.modeIcon}>📰</span>
-            <span className={styles.modeTitle}>Magazine Cover</span>
-            <span className={styles.modeDesc}>
-              Become the cover star of your own magazine
-            </span>
-          </button>
+          {visibleCards.map((card) => (
+            <button
+              key={card.key}
+              className={styles.modeCard}
+              onClick={() => onSelectMode(card.key)}
+            >
+              <span className={styles.modeIcon}>{card.icon}</span>
+              <span className={styles.modeTitle}>{card.title}</span>
+              <span className={styles.modeDesc}>{card.desc}</span>
+            </button>
+          ))}
         </div>
       </div>
       <div className={styles.bgGlow} />

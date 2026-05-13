@@ -11,6 +11,7 @@ from api.generate import router as generate_router
 from api.admin import router as admin_router
 from api.wtm import router as wtm_router
 from api.wtm_admin import router as wtm_admin_router
+from api.feature_flags import router as feature_flags_router
 from config import settings
 
 
@@ -58,6 +59,7 @@ app.include_router(generate_router, prefix="/api", tags=["generate"])
 app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
 app.include_router(wtm_router, prefix="/api/wtm", tags=["wtm"])
 app.include_router(wtm_admin_router, prefix="/api/admin/wtm", tags=["wtm-admin"])
+app.include_router(feature_flags_router, prefix="/api", tags=["feature-flags"])
 
 
 @app.get("/")

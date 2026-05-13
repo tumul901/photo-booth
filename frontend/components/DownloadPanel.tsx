@@ -16,6 +16,8 @@ interface DownloadPanelProps {
   shareUrl: string | null;
   outputId: string | null;
   isReady: boolean;
+  printWidthMm?: number;
+  printHeightMm?: number;
 }
 
 export default function DownloadPanel({
@@ -23,6 +25,8 @@ export default function DownloadPanel({
   shareUrl,
   outputId,
   isReady,
+  printWidthMm,
+  printHeightMm,
 }: DownloadPanelProps) {
   const [canShare, setCanShare] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -86,15 +90,27 @@ export default function DownloadPanel({
 
   const handlePrint = useCallback(() => {
     if (!downloadUrl) return;
-    
-    // Open image in new window and print
-    const printWindow = window.open(downloadUrl, '_blank');
-    if (printWindow) {
-      printWindow.onload = () => {
-        printWindow.print();
-      };
-    }
-  }, [downloadUrl]);
+    // <img src> loads cross-origin images fine and ignores Content-Disposition: attachment.
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+    const doc = printWindow.document;
+    doc.title = 'Print';
+    const style = doc.createElement('style');
+    const pageSize = printWidthMm && printHeightMm
+      ? `@page{size:${printWidthMm}mm ${printHeightMm}mm;margin:0}`
+      : '@media print{body{margin:0}}';
+    style.textContent = [
+      '*{margin:0;padding:0;box-sizing:border-box}',
+      'body{display:flex;justify-content:center;align-items:center;min-height:100vh;background:#fff}',
+      'img{max-width:100%;max-height:100vh;object-fit:contain}',
+      pageSize,
+    ].join('');
+    doc.head.appendChild(style);
+    const img = doc.createElement('img');
+    img.src = downloadUrl;
+    img.onload = () => { printWindow.focus(); printWindow.print(); };
+    doc.body.appendChild(img);
+  }, [downloadUrl, printWidthMm, printHeightMm]);
 
   if (!isReady) {
     return null;

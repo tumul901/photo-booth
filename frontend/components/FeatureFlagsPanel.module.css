@@ -1,0 +1,346 @@
+.container {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1rem;
+  color: #e5e7eb;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.statusSaving {
+  color: #fbbf24;
+  font-size: 0.85rem;
+}
+
+.statusSaved {
+  color: #34d399;
+  font-size: 0.85rem;
+}
+
+.loading,
+.error {
+  padding: 2rem;
+  text-align: center;
+}
+
+.error {
+  color: #fca5a5;
+}
+
+.section {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.sectionTitle {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0 0 0.25rem 0;
+  color: #f1f5f9;
+}
+
+.sectionHint {
+  font-size: 0.85rem;
+  color: #94a3b8;
+  margin: 0 0 1rem 0;
+}
+
+.sectionHint code {
+  background: rgba(15, 23, 42, 0.8);
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.25rem;
+  font-size: 0.78rem;
+  color: #cbd5e1;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  background: rgba(30, 41, 59, 0.5);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+.row:hover {
+  background: rgba(30, 41, 59, 0.75);
+}
+
+.rowText {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  flex: 1;
+}
+
+.rowLabel {
+  font-weight: 500;
+  color: #f1f5f9;
+  font-size: 0.95rem;
+}
+
+.rowHint {
+  font-size: 0.78rem;
+  color: #94a3b8;
+  margin-top: 0.15rem;
+}
+
+/* Toggle switch */
+.toggle {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  background: #475569;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.toggle:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.toggleOn {
+  background: #10b981;
+}
+
+.toggleKnob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  background: #f8fafc;
+  border-radius: 50%;
+  transition: transform 0.15s ease;
+}
+
+.toggleOn .toggleKnob {
+  transform: translateX(20px);
+}
+
+/* Profile rows (radio-like buttons) */
+.profileRow {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  background: rgba(30, 41, 59, 0.5);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  border-radius: 0.5rem;
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+}
+
+.profileRow:hover {
+  background: rgba(30, 41, 59, 0.75);
+}
+
+.profileRow:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.profileActive {
+  border-color: #10b981;
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.radioDot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.profileActive .radioDot {
+  border-color: #10b981;
+}
+
+.radioDotInner {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+
+.radioDotOn {
+  background: #10b981;
+}
+
+/* Stroke color picker */
+.colorPickerRow {
+  margin-top: 1rem;
+  padding: 0.85rem 1rem;
+  background: rgba(30, 41, 59, 0.5);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  border-radius: 0.5rem;
+}
+
+.colorPickerLabel {
+  display: block;
+  font-weight: 500;
+  color: #f1f5f9;
+  font-size: 0.9rem;
+  margin-bottom: 0.6rem;
+}
+
+.colorPickerControls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.colorInput {
+  width: 40px;
+  height: 32px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 0.35rem;
+  background: transparent;
+  cursor: pointer;
+  padding: 2px;
+  flex-shrink: 0;
+}
+
+.colorInput::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.colorInput::-webkit-color-swatch {
+  border: none;
+  border-radius: 0.2rem;
+}
+
+.colorHexInput {
+  width: 90px;
+  padding: 0.35rem 0.5rem;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 0.35rem;
+  color: #e5e7eb;
+  font-family: monospace;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+}
+
+.colorHexInput:focus {
+  outline: none;
+  border-color: #10b981;
+}
+
+/* Stroke thickness controls */
+.thicknessSlider {
+  flex: 1;
+  height: 6px;
+  accent-color: #10b981;
+  cursor: pointer;
+}
+
+.thicknessNumber {
+  width: 52px;
+  padding: 0.3rem 0.4rem;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 0.35rem;
+  color: #e5e7eb;
+  font-size: 0.85rem;
+  text-align: center;
+  flex-shrink: 0;
+  -moz-appearance: textfield;
+}
+
+.thicknessNumber::-webkit-inner-spin-button,
+.thicknessNumber::-webkit-outer-spin-button {
+  opacity: 1;
+}
+
+.thicknessNumber:focus {
+  outline: none;
+  border-color: #10b981;
+}
+
+.colorPreview {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid rgba(148, 163, 184, 0.3);
+  flex-shrink: 0;
+}
+
+/* Save / Cancel action buttons */
+.colorActions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.colorSaveBtn,
+.colorCancelBtn {
+  padding: 0.4rem 1rem;
+  border-radius: 0.4rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.colorSaveBtn {
+  background: #10b981;
+  color: #fff;
+}
+
+.colorSaveBtn:hover:not(:disabled) {
+  background: #059669;
+}
+
+.colorCancelBtn {
+  background: transparent;
+  color: #94a3b8;
+  border-color: rgba(148, 163, 184, 0.25);
+}
+
+.colorCancelBtn:hover:not(:disabled) {
+  background: rgba(148, 163, 184, 0.1);
+  color: #e2e8f0;
+}
+
+.colorSaveBtn:disabled,
+.colorCancelBtn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}

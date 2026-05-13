@@ -14,6 +14,8 @@ interface ResultScreenProps {
     outputId: string;
     downloadUrl: string;
     shareUrl: string;
+    printWidthMm?: number;
+    printHeightMm?: number;
   };
   onStartOver: () => void;
 }
@@ -38,6 +40,8 @@ export default function ResultScreen({ result, onStartOver }: ResultScreenProps)
               shareUrl={result.shareUrl}
               outputId={result.outputId}
               isReady={true}
+              printWidthMm={result.printWidthMm}
+              printHeightMm={result.printHeightMm}
             />
           </div>
 

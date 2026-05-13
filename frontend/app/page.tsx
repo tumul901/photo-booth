@@ -88,6 +88,8 @@ interface ResultData {
   outputId: string;
   downloadUrl: string;
   shareUrl: string;
+  printWidthMm?: number;
+  printHeightMm?: number;
 }
 
 type ProcessingMode = 'frame' | 'sticker' | 'word_template' | 'magazine';
@@ -105,6 +107,8 @@ export default function BoothPage() {
   const [selectedTemplateMode, setSelectedTemplateMode] = useSessionState<string>('selectedTemplateMode', '');
   const [magazineName, setMagazineName] = useSessionState<string>('magazineName', '');
   const [magazineDesignation, setMagazineDesignation] = useSessionState<string>('magazineDesignation', '');
+  const [overlayName, setOverlayName] = useSessionState<string>('overlayName', '');
+  const [overlayDesignation, setOverlayDesignation] = useSessionState<string>('overlayDesignation', '');
   const [wtmName, setWtmName] = useSessionState<string>('wtmName', '');
   const [wtmDesignation, setWtmDesignation] = useSessionState<string>('wtmDesignation', '');
 
@@ -114,13 +118,43 @@ export default function BoothPage() {
   const [templateConfig, setTemplateConfig] = useState<any>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Overlay flags: set by fetching template config when a template is selected
+  const [templateHasNameText, setTemplateHasNameText] = useState(false);
+  const [templateHasDesignationText, setTemplateHasDesignationText] = useState(false);
+  const [templatePrintWidthMm, setTemplatePrintWidthMm] = useState<number | undefined>(undefined);
+  const [templatePrintHeightMm, setTemplatePrintHeightMm] = useState<number | undefined>(undefined);
 
   // True when the selected template uses magazine composite mode
   const isMagazineTemplate = selectedTemplateMode === 'magazine';
+  // True when a sticker/luggage card template has name or designation overlay configured
+  const isOverlayTemplate = !isMagazineTemplate && (templateHasNameText || templateHasDesignationText);
 
-  // Both WTM and magazine insert an extra step at position 3
-  // This shifts capture to step 4 and result to step 5
-  const hasExtraStep = processingMode === 'word_template' || processingMode === 'magazine' || isMagazineTemplate;
+  // Fetch template config when a template is selected to detect overlay flags
+  useEffect(() => {
+    if (!selectedTemplate) {
+      setTemplateHasNameText(false);
+      setTemplateHasDesignationText(false);
+      return;
+    }
+    fetch(`${API_BASE_URL}/api/admin/templates/${selectedTemplate}/config`)
+      .then(r => r.ok ? r.json() : null)
+      .then(cfg => {
+        if (!cfg) return;
+        setTemplateHasNameText(!!(cfg.name_text && Object.keys(cfg.name_text).length > 0));
+        setTemplateHasDesignationText(!!(cfg.designation_text && Object.keys(cfg.designation_text).length > 0));
+        if (cfg.luggage_card_mode) {
+          setTemplatePrintWidthMm(cfg.print_width_mm ?? 86);
+          setTemplatePrintHeightMm(cfg.print_height_mm ?? 54);
+        } else {
+          setTemplatePrintWidthMm(undefined);
+          setTemplatePrintHeightMm(undefined);
+        }
+      })
+      .catch(() => {});
+  }, [selectedTemplate]);
+
+  // WTM, magazine, and overlay templates insert an extra step at position 3
+  const hasExtraStep = processingMode === 'word_template' || processingMode === 'magazine' || isMagazineTemplate || isOverlayTemplate;
   const captureStep = hasExtraStep ? 4 : 3;
   const resultStep  = hasExtraStep ? 5 : 4;
 
@@ -144,9 +178,18 @@ export default function BoothPage() {
     (name: string, designation: string) => {
       setMagazineName(name);
       setMagazineDesignation(designation);
-      setStep(captureStep); // Jump to capture step (4)
+      setStep(captureStep);
     },
     [setMagazineName, setMagazineDesignation, setStep, captureStep]
+  );
+
+  const handleOverlayNameConfirm = useCallback(
+    (name: string, designation: string) => {
+      setOverlayName(name);
+      setOverlayDesignation(designation);
+      setStep(captureStep);
+    },
+    [setOverlayName, setOverlayDesignation, setStep, captureStep]
   );
 
   const handleBack = useCallback(() => {
@@ -162,14 +205,20 @@ export default function BoothPage() {
       setMagazineName('');
       setMagazineDesignation('');
     }
+    // Overlay: clear name/designation when stepping back FROM name screen TO templates
+    if (step === 3 && isOverlayTemplate) {
+      setOverlayName('');
+      setOverlayDesignation('');
+    }
     // Note: stepping back from capture (step 4) to name screen (step 3)
     // does NOT clear values — they stay pre-filled so user doesn't re-type.
     setStep((prev: number) => Math.max(1, prev - 1));
     setError(null);
   }, [
-    step, processingMode, isMagazineTemplate,
+    step, processingMode, isMagazineTemplate, isOverlayTemplate,
     setStep, setSelectedWords, setComposedTemplatePath,
-    setMagazineName, setMagazineDesignation, setWtmName, setWtmDesignation
+    setMagazineName, setMagazineDesignation, setWtmName, setWtmDesignation,
+    setOverlayName, setOverlayDesignation,
   ]);
 
   const compressImage = async (dataUrl: string, maxWidth = 1920, maxHeight = 1920, quality = 0.85): Promise<Blob> => {
@@ -205,7 +254,7 @@ export default function BoothPage() {
     });
   };
 
-  const executeGeneration = async (imageData: string, pMode: string, positionData?: any) => {
+  const executeGeneration = useCallback(async (imageData: string, pMode: string, positionData?: any) => {
     setIsProcessing(true);
     setResult(null);
     setError(null);
@@ -252,6 +301,12 @@ export default function BoothPage() {
         formData.append('magazine_designation', magazineDesignation);
       }
 
+      // Sticker/luggage card overlay mode: send overlay name and designation
+      if (isOverlayTemplate && overlayName) {
+        formData.append('overlay_name', overlayName);
+        formData.append('overlay_designation', overlayDesignation);
+      }
+
       // Send to backend
       console.time('API Generate Request');
       const endpoint = isWTM ? `${API_BASE_URL}/api/wtm/generate` : `${API_BASE_URL}/api/generate`;
@@ -274,17 +329,19 @@ export default function BoothPage() {
         outputId: data.output_id,
         downloadUrl: data.download_url,
         shareUrl: data.output_url,
+        printWidthMm: templatePrintWidthMm,
+        printHeightMm: templatePrintHeightMm,
       };
 
       setResult(resultData);
-      setStep((pMode === 'word_template' || isMagazineTemplate) ? 5 : 4);
+      setStep((pMode === 'word_template' || isMagazineTemplate || isOverlayTemplate) ? 5 : 4);
     } catch (err) {
       console.error('Generate failed:', err);
       setError(err instanceof Error ? err.message : 'Processing failed. Please try again.');
     } finally {
       setIsProcessing(false);
     }
-  };
+  }, [selectedTemplate, composedTemplatePath, wtmName, wtmDesignation, isMagazineTemplate, magazineName, magazineDesignation, isOverlayTemplate, overlayName, overlayDesignation, templatePrintWidthMm, templatePrintHeightMm, setStep, setIsProcessing, setResult, setError]);
 
   const handleImageCapture = useCallback(async (imageData: string) => {
     setError(null);
@@ -297,18 +354,24 @@ export default function BoothPage() {
     // WTM mode: check allow_manual_positioning from config (default true for backwards compat)
     if (processingMode === 'word_template' && composedTemplatePath) {
       let allowManual = true;
+      let wtmCfg: any = null;
       try {
         const res = await fetch(`${API_BASE_URL}/api/admin/wtm/templates/${selectedTemplate}/config`);
         if (res.ok) {
-          const cfg = await res.json();
+          wtmCfg = await res.json();
           // If field is explicitly false, skip edit screen; missing = default true
-          allowManual = cfg.allow_manual_positioning !== false;
+          allowManual = wtmCfg.allow_manual_positioning !== false;
         }
       } catch { /* network error — fall back to showing edit screen */ }
 
       if (allowManual) {
         setRawImage(imageData);
-        setTemplateConfig({ templateType: 'sticker', isWTM: true });
+        setTemplateConfig({
+          templateType: 'sticker',
+          isWTM: true,
+          anchorMode: 'bbox_center',         // tight crop — removes transparent border
+          photoSlot: wtmCfg?.photo_slot ?? null,  // used by PreviewEditScreen for auto-fit
+        });
         setIsEditing(true);
         return;
       }
@@ -336,7 +399,7 @@ export default function BoothPage() {
 
     // Standard auto-compose flow
     executeGeneration(imageData, processingMode);
-  }, [selectedTemplate, processingMode, composedTemplatePath, isMagazineTemplate, magazineName, magazineDesignation]);
+  }, [selectedTemplate, processingMode, composedTemplatePath, executeGeneration]);
 
   const handleEditComplete = useCallback((extractedBase64: string, position: any) => {
     setIsEditing(false);
@@ -345,7 +408,7 @@ export default function BoothPage() {
     } else {
       executeGeneration(extractedBase64, "pre_extracted", position);
     }
-  }, [selectedTemplate, processingMode, composedTemplatePath]);
+  }, [processingMode, composedTemplatePath, executeGeneration]);
 
   const handleWordSelectionConfirm = useCallback((composedPath: string, name: string, designation: string) => {
     setComposedTemplatePath(composedPath);
@@ -355,21 +418,25 @@ export default function BoothPage() {
   }, [setComposedTemplatePath, setWtmName, setWtmDesignation, setStep]);
 
   const handleStartOver = useCallback(() => {
+    // Keep processingMode so the user lands back on template selection in the same mode
+    const currentMode = processingMode;
     clearSession();
-    setStep(1);
-    setProcessingMode('frame');
+    setProcessingMode(currentMode);
+    setStep(2);
     setSelectedTemplate('');
+    setSelectedTemplateMode('');
     setResult(null);
     setSelectedWords([]);
     setComposedTemplatePath(null);
     setMagazineName('');
     setMagazineDesignation('');
+    setOverlayName('');
+    setOverlayDesignation('');
     setWtmName('');
     setWtmDesignation('');
-    setSelectedTemplateMode('');
     setError(null);
     setIsProcessing(false);
-  }, [setStep, setProcessingMode, setSelectedTemplate, setResult, setSelectedWords, setComposedTemplatePath]);
+  }, [processingMode, setStep, setProcessingMode, setSelectedTemplate, setSelectedTemplateMode, setResult, setSelectedWords, setComposedTemplatePath, setMagazineName, setMagazineDesignation, setOverlayName, setOverlayDesignation, setWtmName, setWtmDesignation]);
 
   const handleError = useCallback((msg: string) => {
     setError(msg);
@@ -412,10 +479,24 @@ export default function BoothPage() {
         {/* Step 3 — Magazine: Name + Designation input */}
         {step === 3 && isMagazineTemplate && (
           <MagazineNameScreen
+            mode="magazine"
             onConfirm={handleMagazineNameConfirm}
             onBack={handleBack}
             initialName={magazineName}
             initialDesignation={magazineDesignation}
+          />
+        )}
+
+        {/* Step 3 — Sticker/Luggage card: overlay name + designation input */}
+        {step === 3 && isOverlayTemplate && (
+          <MagazineNameScreen
+            mode="overlay"
+            showName={templateHasNameText}
+            showDesignation={templateHasDesignationText}
+            onConfirm={handleOverlayNameConfirm}
+            onBack={handleBack}
+            initialName={overlayName}
+            initialDesignation={overlayDesignation}
           />
         )}
 
@@ -454,6 +535,7 @@ export default function BoothPage() {
                 : undefined
             }
             skipConfigFetch={processingMode === 'word_template'}
+            photoSlot={templateConfig?.photoSlot}
           />
         )}
 

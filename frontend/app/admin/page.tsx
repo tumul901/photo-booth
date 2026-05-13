@@ -5,6 +5,8 @@ import styles from './page.module.css';
 import TemplateEditor from '@/components/TemplateEditor';
 import WTMAdmin from '@/components/WTMAdmin';
 import MagazineAdmin from '@/components/MagazineAdmin';
+import FeatureFlagsPanel from '@/components/FeatureFlagsPanel';
+import GalleryPanel from '@/components/admin/GalleryPanel';
 
 // Types
 interface Stats {
@@ -19,14 +21,6 @@ interface Template {
   name: string;
   mode: 'frame' | 'sticker';
   png_path: string;
-}
-
-interface GalleryItem {
-  output_id: string;
-  filename: string;
-  url: string;
-  size: number;
-  last_modified: string;
 }
 
 interface TemplateConfig {
@@ -55,11 +49,22 @@ interface TemplateConfig {
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
+type AdminTab = 'stats' | 'templates' | 'gallery' | 'wtm' | 'magazine' | 'features';
+
+const VALID_TABS: AdminTab[] = ['stats', 'templates', 'gallery', 'wtm', 'magazine', 'features'];
+
+function getTabFromHash(): AdminTab {
+  if (typeof window === 'undefined') return 'stats';
+  const hash = window.location.hash.replace('#', '') as AdminTab;
+  return VALID_TABS.includes(hash) ? hash : 'stats';
+}
+
 export default function AdminPage() {
-  const [activeTab, setActiveTab] = useState<'stats' | 'templates' | 'gallery' | 'wtm' | 'magazine'>('stats');
+  // Always start with 'stats' to match SSR; useEffect will correct from hash client-side
+  const [activeTab, setActiveTab] = useState<AdminTab>('stats');
   const [stats, setStats] = useState<Stats | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
-  const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([]);
+  const [galleryTotalActive, setGalleryTotalActive] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
@@ -72,11 +77,42 @@ export default function AdminPage() {
   // Editor State
   const [editingTemplate, setEditingTemplate] = useState<Template | null>(null);
 
+  // Gate: prevents the activeTab effect from overwriting the hash during the first render.
+  // Must be STATE (not ref) so that it only becomes true on the NEXT render cycle.
+  const [initialized, setInitialized] = useState(false);
+
+  // On mount (client only): read the hash and correct the tab — runs after hydration
   useEffect(() => {
+    const tab = getTabFromHash();
+    setActiveTab(tab);
+    setInitialized(true);
+    // Both setActiveTab and setInitialized are batched → they trigger ONE re-render
+    // where activeTab='wtm' and initialized=true arrive together.
+  }, []);
+
+  // Sync tab → URL hash whenever tab changes (skips the very first render)
+  useEffect(() => {
+    if (!initialized) return;          // first render: activeTab is still 'stats' — skip
+    window.location.hash = activeTab;  // subsequent renders: safe to write
     fetchData();
-  }, [activeTab]);
+  }, [activeTab, initialized]);
+
+  // Sync URL hash → tab (handles browser back/forward)
+  useEffect(() => {
+    const onHashChange = () => {
+      const tab = getTabFromHash();
+      setActiveTab(tab);
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
 
   const fetchData = async () => {
+    // Tabs that manage their own data don't need page-level fetch
+    if (!['stats', 'templates'].includes(activeTab)) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -90,11 +126,6 @@ export default function AdminPage() {
         if (!res.ok) throw new Error('Failed to fetch templates');
         const data = await res.json();
         setTemplates(data);
-      } else if (activeTab === 'gallery') {
-        const res = await fetch(`${API_BASE_URL}/api/admin/gallery`);
-        if (!res.ok) throw new Error('Failed to fetch gallery');
-        const data = await res.json();
-        setGalleryItems(data);
       }
     } catch (err: any) {
       setError(err.message);
@@ -166,19 +197,6 @@ export default function AdminPage() {
     }
   };
 
-  const handleDeleteGalleryImage = async (outputId: string) => {
-    if (!confirm('Delete this photo from storage?')) return;
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/gallery/${outputId}`, {
-        method: 'DELETE',
-      });
-      if (!res.ok) throw new Error('Delete failed');
-      setGalleryItems((prev) => prev.filter((item) => item.output_id !== outputId));
-    } catch (err: any) {
-      alert(`Error: ${err.message}`);
-    }
-  };
-
   const handleConfigure = (template: Template) => {
     setEditingTemplate(template);
   };
@@ -238,11 +256,11 @@ export default function AdminPage() {
           >
             🖼️ Templates
           </button>
-          <button 
+          <button
             className={`${styles.navButton} ${activeTab === 'gallery' ? styles.active : ''}`}
             onClick={() => setActiveTab('gallery')}
           >
-            📸 Gallery
+            📸 Gallery{galleryTotalActive > 0 && <span className={styles.tabBadge}>{galleryTotalActive}</span>}
           </button>
           <button
             className={`${styles.navButton} ${activeTab === 'wtm' ? styles.active : ''}`}
@@ -255,6 +273,12 @@ export default function AdminPage() {
             onClick={() => setActiveTab('magazine')}
           >
             📰 Magazine
+          </button>
+          <button
+            className={`${styles.navButton} ${activeTab === 'features' ? styles.active : ''}`}
+            onClick={() => setActiveTab('features')}
+          >
+            🎛️ Features
           </button>
         </nav>
       </header>
@@ -376,43 +400,12 @@ export default function AdminPage() {
         )}
 
         {/* Gallery Tab */}
-        {!loading && !error && activeTab === 'gallery' && (
-          <div>
-            <div className={styles.galleryHeader}>
-              <h2 className={styles.sectionTitle}>Output Gallery</h2>
-              <button className={styles.refreshButton} onClick={fetchData}>🔄 Refresh</button>
-            </div>
-            <p className={styles.gallerySubtitle}>{galleryItems.length} photo{galleryItems.length !== 1 ? 's' : ''} in storage</p>
-            
-            <div className={styles.galleryGrid}>
-              {galleryItems.map((item) => (
-                <div key={item.output_id} className={styles.galleryCard}>
-                  <div className={styles.galleryImageWrapper}>
-                    <img 
-                      src={item.url} 
-                      alt={item.filename}
-                      className={styles.galleryImage}
-                      loading="lazy"
-                    />
-                    <button 
-                      className={styles.galleryDeleteOverlay}
-                      onClick={() => handleDeleteGalleryImage(item.output_id)}
-                      title="Delete photo"
-                    >
-                      🗑️
-                    </button>
-                  </div>
-                  <div className={styles.galleryCardInfo}>
-                    <span className={styles.galleryFilename}>{item.filename}</span>
-                    <span className={styles.gallerySize}>{(item.size / 1024).toFixed(0)} KB</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-            {galleryItems.length === 0 && (
-              <p style={{textAlign:'center', color:'#666', marginTop:'2rem'}}>No photos yet. Generate some to see them here!</p>
-            )}
-          </div>
+        {activeTab === 'gallery' && (
+          <GalleryPanel
+            apiBaseUrl={API_BASE_URL}
+            active={activeTab === 'gallery'}
+            onCountUpdate={setGalleryTotalActive}
+          />
         )}
 
         {!loading && !error && activeTab === 'wtm' && (
@@ -421,6 +414,10 @@ export default function AdminPage() {
 
         {activeTab === 'magazine' && (
           <MagazineAdmin apiBaseUrl={API_BASE_URL} />
+        )}
+
+        {activeTab === 'features' && (
+          <FeatureFlagsPanel apiBaseUrl={API_BASE_URL} />
         )}
       </div>
     </main>
