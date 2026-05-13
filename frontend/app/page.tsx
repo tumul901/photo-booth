@@ -352,8 +352,14 @@ export default function BoothPage() {
       return;
     }
 
-    // WTM mode: check allow_manual_positioning from config (default true for backwards compat)
-    if (processingMode === 'word_template' && composedTemplatePath) {
+    // WTM mode: never falls through to the regular /api/admin/templates config fetch below
+    if (processingMode === 'word_template') {
+      if (!composedTemplatePath) {
+        // Word selection was not completed — send user back to that step
+        setStep(3);
+        return;
+      }
+
       let allowManual = true;
       let wtmCfg: any = null;
       try {
