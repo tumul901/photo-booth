@@ -371,19 +371,22 @@ export default function BoothPage() {
         }
       } catch { /* network error — fall back to showing edit screen */ }
 
+      // Always store rawImage + templateConfig so "Adjust Placement" works from result screen
+      const wtmConfig = {
+        templateType: 'sticker',
+        isWTM: true,
+        anchorMode: 'bbox_center',
+        photoSlot: wtmCfg?.photo_slot ?? null,
+      };
+      setRawImage(imageData);
+      setTemplateConfig(wtmConfig);
+
       if (allowManual) {
-        setRawImage(imageData);
-        setTemplateConfig({
-          templateType: 'sticker',
-          isWTM: true,
-          anchorMode: 'bbox_center',         // tight crop — removes transparent border
-          photoSlot: wtmCfg?.photo_slot ?? null,  // used by PreviewEditScreen for auto-fit
-        });
         setIsEditing(true);
         return;
       }
 
-      // Manual positioning disabled — go straight to generation
+      // allow_manual_positioning=false — auto-generate; button still available from result
       executeGeneration(imageData, processingMode);
       return;
     }
@@ -391,14 +394,14 @@ export default function BoothPage() {
     // Store raw image so user can re-open placement editor from the result screen
     setRawImage(imageData);
 
-    // Fetch config for the placement editor (needed if user hits "Adjust Sticker Placement")
+    // Fetch config for the placement editor; default to {} so the button always appears
     try {
       const res = await fetch(`${API_BASE_URL}/api/admin/templates/${selectedTemplate}/config`);
-      if (res.ok) {
-        const config = await res.json();
-        setTemplateConfig(config);
-      }
-    } catch { /* proceed without config — editor uses defaults */ }
+      const config = res.ok ? await res.json() : {};
+      setTemplateConfig(config);
+    } catch {
+      setTemplateConfig({});
+    }
 
     // Auto-generate immediately; user can adjust placement from result screen
     executeGeneration(imageData, processingMode);
@@ -552,7 +555,7 @@ export default function BoothPage() {
             result={result}
             onStartOver={handleStartOver}
             onAdjustPlacement={
-              rawImage && templateConfig && processingMode !== 'word_template' && processingMode !== 'magazine'
+              rawImage && templateConfig && processingMode !== 'magazine'
                 ? () => setIsEditing(true)
                 : undefined
             }
