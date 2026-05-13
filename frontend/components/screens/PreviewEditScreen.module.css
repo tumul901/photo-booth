@@ -95,6 +95,7 @@
   transform-origin: center center;
   user-select: none;
   touch-action: none;
+  will-change: transform;
 }
 
 .dragWrapper:active {

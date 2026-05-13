@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import styles from './PreviewEditScreen.module.css';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -71,10 +71,26 @@ export default function PreviewEditScreen({
   snapEnabledRef.current = snapEnabled;
   const renderBoxRef = useRef<RenderBox | null>(renderBox);
   renderBoxRef.current = renderBox;
+  const posRef = useRef(pos);
+  posRef.current = pos;
+  // Live scale ref — updated by slider onInput without triggering React re-renders
+  const liveScaleRef = useRef(scale);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const templateRef = useRef<HTMLImageElement>(null);
   const stickerRef = useRef<HTMLImageElement>(null);
+  const dragWrapperRef = useRef<HTMLDivElement>(null);
+  const sliderRef = useRef<HTMLInputElement>(null);
+
+  // Sync committed state → DOM without going through React reconciliation.
+  // useLayoutEffect runs before paint so there's no visible flash.
+  useLayoutEffect(() => {
+    if (dragWrapperRef.current) {
+      dragWrapperRef.current.style.transform = `translate(${pos.x}px, ${pos.y}px) scale(${scale})`;
+    }
+    if (sliderRef.current) sliderRef.current.value = String(scale);
+    liveScaleRef.current = scale;
+  }, [pos, scale]);
 
   // ── Render-box computation ──────────────────────────────────────────────────
   const computeRenderBox = useCallback((): RenderBox | null => {
@@ -283,6 +299,19 @@ export default function PreviewEditScreen({
     }
   };
 
+  // Slider: update DOM directly — zero React re-renders during drag
+  const handleSliderInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = parseFloat((e.target as HTMLInputElement).value);
+    liveScaleRef.current = v;
+    if (dragWrapperRef.current) {
+      const p = posRef.current;
+      dragWrapperRef.current.style.transform = `translate(${p.x}px, ${p.y}px) scale(${v})`;
+    }
+  };
+
+  // Commit to React state on release so handleDone reads the right value
+  const commitSliderScale = () => setScale(liveScaleRef.current);
+
   const handleDone = () => {
     if (!extractedSrc || !containerRef.current || !templateRef.current) return;
     const container = containerRef.current;
@@ -450,8 +479,8 @@ export default function PreviewEditScreen({
           {/* Draggable sticker */}
           {!isExtracting && extractedSrc && (
             <div
+              ref={dragWrapperRef}
               className={styles.dragWrapper}
-              style={{ transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale})` }}
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
@@ -481,11 +510,14 @@ export default function PreviewEditScreen({
           <div className={styles.sliderGroup}>
             <span>Smaller</span>
             <input
+              ref={sliderRef}
               type="range"
               className={styles.slider}
               min="0.05" max="3" step="0.02"
-              value={scale}
-              onChange={e => setScale(parseFloat(e.target.value))}
+              defaultValue={scale}
+              onChange={handleSliderInput}
+              onPointerUp={commitSliderScale}
+              onKeyUp={commitSliderScale}
             />
             <span>Larger</span>
           </div>
