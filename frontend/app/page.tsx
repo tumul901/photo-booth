@@ -129,9 +129,10 @@ export default function BoothPage() {
   // True when a sticker/luggage card template has name or designation overlay configured
   const isOverlayTemplate = !isMagazineTemplate && (templateHasNameText || templateHasDesignationText);
 
-  // Fetch template config when a template is selected to detect overlay flags
+  // Fetch template config when a template is selected to detect overlay flags.
+  // WTM templates live in the WTM config system, not /api/admin/templates — skip them.
   useEffect(() => {
-    if (!selectedTemplate) {
+    if (!selectedTemplate || processingMode === 'word_template') {
       setTemplateHasNameText(false);
       setTemplateHasDesignationText(false);
       return;
@@ -151,7 +152,7 @@ export default function BoothPage() {
         }
       })
       .catch(() => {});
-  }, [selectedTemplate]);
+  }, [selectedTemplate, processingMode]);
 
   // WTM, magazine, and overlay templates insert an extra step at position 3
   const hasExtraStep = processingMode === 'word_template' || processingMode === 'magazine' || isMagazineTemplate || isOverlayTemplate;
