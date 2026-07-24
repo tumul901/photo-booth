@@ -26,6 +26,8 @@ interface Flags {
   sticker_effect: string;
   sticker_stroke_color: string;
   sticker_stroke_width: number;
+  capture_form: boolean;
+  edge_cleanup: boolean;
 }
 
 const MODE_LABELS: Array<{ key: Mode; label: string; hint: string }> = [
@@ -36,6 +38,10 @@ const MODE_LABELS: Array<{ key: Mode; label: string; hint: string }> = [
 ];
 
 const PROFILE_DETAIL: Record<string, { label: string; desc: string }> = {
+  human_hi: {
+    label: 'human_hi (recommended)',
+    desc: 'u2net_human_seg — human-specialized. Cleanest body silhouette on busy/low-contrast backgrounds and the fastest (~0.5 s). Best default for a people booth.',
+  },
   isnet_hi: {
     label: 'isnet_hi',
     desc: 'isnet-general-use at 1200 px. Sharper edges (hair, turban, collar). ~+1 s per cutout vs silueta.',
@@ -238,6 +244,65 @@ export default function FeatureFlagsPanel({ apiBaseUrl }: FeatureFlagsPanelProps
               </button>
             );
           })}
+        </div>
+      </section>
+
+      <section className={styles.section}>
+        <h3 className={styles.sectionTitle}>Edge Cleanup</h3>
+        <p className={styles.sectionHint}>
+          Removes the colored halo/bleed and stray segmentation ghosts after background
+          removal — works on any background (no green screen needed). Adds ~150&nbsp;ms.
+          Leave ON unless comparing.
+        </p>
+        <div className={styles.list}>
+          <label className={styles.row}>
+            <div className={styles.rowText}>
+              <span className={styles.rowLabel}>Decontaminate edges &amp; drop ghosts</span>
+              <span className={styles.rowHint}>
+                {flags.edge_cleanup
+                  ? 'ON — edge ring recolored to the subject, faint leftover blobs removed'
+                  : 'OFF — raw cutout from the model'}
+              </span>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={flags.edge_cleanup}
+              className={`${styles.toggle} ${flags.edge_cleanup ? styles.toggleOn : ''}`}
+              onClick={() => persist({ edge_cleanup: !flags.edge_cleanup } as any)}
+              disabled={saving}
+            >
+              <span className={styles.toggleKnob} />
+            </button>
+          </label>
+        </div>
+      </section>
+
+      <section className={styles.section}>
+        <h3 className={styles.sectionTitle}>Capture Form</h3>
+        <p className={styles.sectionHint}>
+          When enabled, the booth shows a name + phone number form before the session starts.
+          Toggle off between events so guests aren&apos;t prompted unnecessarily.
+        </p>
+        <div className={styles.list}>
+          <label className={styles.row}>
+            <div className={styles.rowText}>
+              <span className={styles.rowLabel}>Collect name &amp; phone</span>
+              <span className={styles.rowHint}>
+                {flags.capture_form ? 'Form is ON — guests will be asked for name and phone' : 'Form is OFF — booth proceeds directly to mode selection'}
+              </span>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={flags.capture_form}
+              className={`${styles.toggle} ${flags.capture_form ? styles.toggleOn : ''}`}
+              onClick={() => persist({ capture_form: !flags.capture_form } as any)}
+              disabled={saving}
+            >
+              <span className={styles.toggleKnob} />
+            </button>
+          </label>
         </div>
       </section>
 

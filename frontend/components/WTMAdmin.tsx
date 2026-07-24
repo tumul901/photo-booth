@@ -22,6 +22,10 @@ const WTMAdmin: React.FC<WTMAdminProps> = ({ apiBaseUrl }) => {
   const [createFile, setCreateFile] = useState<File | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
+  // Cache clearing
+  const [isClearingCache, setIsClearingCache] = useState(false);
+  const [cacheMsg, setCacheMsg] = useState<string | null>(null);
+
   useEffect(() => {
     if (view === 'list') {
       fetchTemplates();
@@ -86,6 +90,22 @@ const WTMAdmin: React.FC<WTMAdminProps> = ({ apiBaseUrl }) => {
       fetchTemplates();
     } catch (err: any) {
       alert(`Error: ${err.message}`);
+    }
+  };
+
+  const handleClearCache = async () => {
+    if (!confirm('Delete all cached WTM composition images? They will be regenerated on next use.')) return;
+    setIsClearingCache(true);
+    setCacheMsg(null);
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/admin/wtm/cache`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to clear cache');
+      const data = await res.json();
+      setCacheMsg(`Cleared ${data.deleted_files} files (${data.freed_mb} MB freed)`);
+    } catch (err: any) {
+      setCacheMsg(`Error: ${err.message}`);
+    } finally {
+      setIsClearingCache(false);
     }
   };
 
@@ -157,6 +177,16 @@ const WTMAdmin: React.FC<WTMAdminProps> = ({ apiBaseUrl }) => {
     <div className={styles.container}>
       <div className={styles.header}>
         <h2 className={styles.title}>Word Templates</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {cacheMsg && <span style={{ fontSize: '0.85rem', color: '#666' }}>{cacheMsg}</span>}
+          <button
+            className={styles.actionButton}
+            onClick={handleClearCache}
+            disabled={isClearingCache}
+          >
+            {isClearingCache ? 'Clearing...' : '🗑️ Clear Cache'}
+          </button>
+        </div>
       </div>
 
       {error && <div className={styles.error}>{error}</div>}

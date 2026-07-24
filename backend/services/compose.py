@@ -13,12 +13,73 @@ import os
 import json
 import time
 from types import SimpleNamespace
+import numpy as np
 from PIL import Image, ImageOps, ImageFilter, ImageEnhance
 from typing import Tuple, Optional, Dict, List
 from dataclasses import dataclass
 from functools import lru_cache
 import json
 from services.face_service import FaceLandmarks
+
+
+def analyze_subject(img: Image.Image, alpha_threshold: int = 16) -> Optional[SimpleNamespace]:
+    """
+    Derive stable placement anchors from a cutout's alpha mask.
+
+    This is the robustness core of baseline placement: it depends only on the
+    rembg silhouette (always available, smooth) — never on face detection.
+
+    Robustness tricks:
+      - Per-row *extent* (last_true - first_true) is used instead of opaque-pixel
+        count, so interior holes/transparency don't shrink the measured width.
+      - Only "body rows" (extent >= 25% of the widest row) contribute, so a stray
+        dangling hand, hair wisp, or prop can't drag the measurements around.
+      - `width` is the 90th percentile of body-row extents (resists raised arms).
+      - `bottom_y` is the lowest *body* row (a real torso edge), not the absolute
+        lowest non-transparent pixel.
+
+    Returns a SimpleNamespace(bottom_y, center_x, width, top_y) in the image's own
+    pixel space, or None if the mask is degenerate (empty / too small to trust).
+    """
+    if img.mode != "RGBA":
+        img = img.convert("RGBA")
+
+    alpha = np.asarray(img.getchannel("A"))
+    mask = alpha > alpha_threshold
+
+    rows_any = np.where(mask.any(axis=1))[0]
+    if rows_any.size == 0:
+        return None
+
+    # Per-row horizontal extent (rightmost - leftmost opaque pixel + 1).
+    # argmax on the row finds the first True; argmax on the reversed row finds
+    # the last True. Only meaningful for rows that have any content.
+    first = mask.argmax(axis=1)
+    last = mask.shape[1] - 1 - mask[:, ::-1].argmax(axis=1)
+    extent = np.where(mask.any(axis=1), last - first + 1, 0)
+
+    max_w = int(extent.max())
+    if max_w < 8:
+        return None  # subject too small to place reliably
+
+    body = extent >= (0.25 * max_w)
+    body_rows = np.where(body)[0]
+    if body_rows.size == 0:
+        return None
+
+    width = float(np.percentile(extent[body_rows], 90))
+    top_y = int(body_rows.min())
+    bottom_y = int(body_rows.max())
+    # Horizontal center = median midpoint across the body band.
+    midpoints = (first[body_rows] + last[body_rows]) / 2.0
+    center_x = float(np.median(midpoints))
+
+    return SimpleNamespace(
+        bottom_y=bottom_y,
+        top_y=top_y,
+        center_x=center_x,
+        width=max(width, 1.0),
+    )
 
 
 @lru_cache(maxsize=8)
@@ -72,6 +133,15 @@ class MagazineTextConfig:
     align: str = "left"         # "left", "center", "right"
     uppercase: bool = False     # If True, force text to uppercase before drawing
     rotation: float = 0.0       # Rotation degrees (CCW positive). (x,y) is the rotation pivot.
+    # --- Extended styling (all pixel values in template-native space) ---
+    letter_spacing: float = 0.0 # Inter-character spacing in native px (can be negative)
+    stroke_width: int = 0       # Text outline width in native px (0 = no outline)
+    stroke_color: str = "#000000"
+    shadow_blur: int = 0        # Drop-shadow blur radius in native px (0 = no shadow)
+    shadow_color: str = "#000000"
+    shadow_offset_x: int = 0    # Drop-shadow horizontal offset in native px
+    shadow_offset_y: int = 0    # Drop-shadow vertical offset in native px
+    opacity: int = 100          # 0-100 text opacity
 
 @dataclass
 class TemplateMetadata:
@@ -88,6 +158,10 @@ class TemplateMetadata:
     sticker_filter: str = "none"  # "none", "bw", "sketch"
     fg_path: str = ""  # Magazine mode: foreground overlay PNG (goes on top of user)
     fg_offset: Optional[Dict] = None  # Magazine mode: FG overlay position offset {x, y}
+    # Baseline placement (anchor_mode == "baseline"): one horizontal segment that
+    # encodes where the subject's bottom sits (y), the horizontal center
+    # (midpoint of x1..x2) and the target subject width (|x2 - x1|).
+    baseline: Optional[Dict] = None  # {"x1", "x2", "y"} in template-native pixels
 
     # Text overlay positions (used by magazine mode and sticker/luggage card mode)
     name_text: Optional['MagazineTextConfig'] = None
@@ -206,6 +280,14 @@ def load_template_metadata(template_id: str, templates_dir: Optional[str] = None
                     align=raw.get("align", "left"),
                     uppercase=bool(raw.get("uppercase", False)),
                     rotation=float(raw.get("rotation", 0.0)),
+                    letter_spacing=float(raw.get("letterSpacing", 0.0)),
+                    stroke_width=int(raw.get("strokeWidth", 0)),
+                    stroke_color=raw.get("strokeColor", "#000000"),
+                    shadow_blur=int(raw.get("shadowBlur", 0)),
+                    shadow_color=raw.get("shadowColor", "#000000"),
+                    shadow_offset_x=int(raw.get("shadowOffsetX", 0)),
+                    shadow_offset_y=int(raw.get("shadowOffsetY", 0)),
+                    opacity=int(raw.get("opacity", 100)),
                 )
 
             name_text_cfg = _parse_text_cfg(data.get("name_text", {}))
@@ -214,12 +296,16 @@ def load_template_metadata(template_id: str, templates_dir: Optional[str] = None
             raw_fg_offset = data.get("fg_offset")
             fg_offset = raw_fg_offset if isinstance(raw_fg_offset, dict) else None
 
+            raw_baseline = data.get("baseline")
+            baseline = raw_baseline if isinstance(raw_baseline, dict) and raw_baseline else None
+
             return TemplateMetadata(
                 template_id=data.get("templateId", data.get("id", template_id)),
                 name=data.get("name", "Unnamed"),
                 png_path=png_url,
                 fg_path=raw_fg,
                 fg_offset=fg_offset,
+                baseline=baseline,
                 slots=slots,
                 anchor_mode=data.get("anchorMode", "bbox_center"),
                 width=w,
@@ -479,110 +565,175 @@ class ComposeService:
         font_size = int(cfg.font_size * res_multiplier)
         max_width = int(cfg.max_width * res_multiplier) if cfg.max_width > 0 else 0
 
-        # Load font
-        font = None
-        if cfg.font_path and os.path.exists(cfg.font_path):
-            try:
-                font = ImageFont.truetype(cfg.font_path, font_size)
-            except Exception as e:
-                print(f"WARNING: Could not load font {cfg.font_path}: {e}. Using default.", flush=True)
+        # Font loader (reused while auto-shrinking): tries the configured font,
+        # then common system fallbacks, then Pillow's built-in default.
+        def _load_font(size: int):
+            size = max(1, int(size))
+            if cfg.font_path and os.path.exists(cfg.font_path):
+                try:
+                    return ImageFont.truetype(cfg.font_path, size)
+                except Exception as e:
+                    print(f"WARNING: Could not load font {cfg.font_path}: {e}. Using default.", flush=True)
+            for fallback in [
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+                "C:/Windows/Fonts/arial.ttf",
+            ]:
+                if os.path.exists(fallback):
+                    try:
+                        return ImageFont.truetype(fallback, size)
+                    except Exception:
+                        pass
+            return ImageFont.load_default()
 
-        if font is None:
-            # Pillow built-in default — no TTF needed, always available
-            # Note: default font ignores size; this is a fallback only
+        from PIL import ImageColor, ImageFilter
+
+        def _rgba(c, default):
             try:
-                # Try to load a common system font as a better fallback
-                for fallback in [
-                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-                    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-                    "C:/Windows/Fonts/arial.ttf",
-                ]:
-                    if os.path.exists(fallback):
-                        font = ImageFont.truetype(fallback, font_size)
-                        break
+                rgb = ImageColor.getrgb(c)
+                return rgb + (255,) if len(rgb) == 3 else rgb
             except Exception:
-                pass
+                return default
 
-        if font is None:
-            font = ImageFont.load_default()
+        fill_rgba = _rgba(cfg.color, (255, 255, 255, 255))
+        stroke_rgba = _rgba(cfg.stroke_color, (0, 0, 0, 255))
+        shadow_rgba = _rgba(cfg.shadow_color, (0, 0, 0, 255))
 
-        # Parse colour (supports "#RRGGBB" and named colours like "white")
-        try:
-            from PIL import ImageColor
-            rgb = ImageColor.getrgb(cfg.color)
-            colour_rgba = rgb + (255,) if len(rgb) == 3 else rgb
-        except Exception:
-            colour_rgba = (255, 255, 255, 255)
+        # Scaled styling params
+        spacing = cfg.letter_spacing * res_multiplier
+        stroke_w = max(0, int(round(cfg.stroke_width * res_multiplier)))
+        shadow_blur = max(0, int(round(cfg.shadow_blur * res_multiplier)))
+        shadow_dx = int(round(cfg.shadow_offset_x * res_multiplier))
+        shadow_dy = int(round(cfg.shadow_offset_y * res_multiplier))
+        opacity = max(0, min(100, cfg.opacity)) / 100.0
 
         draw = ImageDraw.Draw(canvas)
 
-        # If max_width is set, truncate text to fit (single line only — no wrapping)
+        def _glyph_w(s: str, fnt) -> int:
+            """Ink width of the glyphs alone (letter spacing NOT included)."""
+            if not s:
+                return 0
+            b = draw.textbbox((0, 0), s, font=fnt)
+            return b[2] - b[0]
+
+        def _full_w(s: str, fnt) -> int:
+            """Drawn width including inter-character spacing (for layout/box)."""
+            if not s:
+                return 0
+            if spacing:
+                return int(round(sum(draw.textlength(ch, font=fnt) for ch in s) + spacing * (len(s) - 1)))
+            return _glyph_w(s, fnt)
+
+        # --- Fit width: the horizontal space the text is allowed to occupy ---
+        # If maxWidth is set, that's the box. Otherwise derive it from the anchor's
+        # position and alignment so text can't run off the canvas edge.
+        margin = int(8 * res_multiplier)
         if max_width > 0:
-            truncated = False
-            while len(display_text) > 1:
-                bbox = draw.textbbox((0, 0), display_text, font=font)
-                text_w = bbox[2] - bbox[0]
-                if text_w <= max_width:
-                    break
+            fit_w = max_width
+        elif cfg.align == "left":
+            fit_w = canvas.width - x - margin
+        elif cfg.align == "right":
+            fit_w = x - margin
+        else:  # center
+            fit_w = 2 * min(x, canvas.width - x) - margin
+        fit_w = max(fit_w, 1)
+
+        # --- Auto-shrink to fit: reduce the font (down to a floor) so long names
+        # scale down instead of overflowing. IMPORTANT: this is driven by the GLYPH
+        # width only — letter spacing must never shrink the font (otherwise cranking
+        # the spacing slider collapses the text to a tiny size). Spacing just spreads
+        # the letters and is allowed to overflow (the operator dials it back). ---
+        font = _load_font(font_size)
+        glyph_w = _glyph_w(display_text, font)
+        min_font_size = max(8, int(font_size * 0.4))
+        if glyph_w > fit_w and glyph_w > 0:
+            font_size = max(min_font_size, int(font_size * fit_w / glyph_w))
+            font = _load_font(font_size)
+            glyph_w = _glyph_w(display_text, font)
+            while glyph_w > fit_w and font_size > min_font_size:
+                font_size -= 1
+                font = _load_font(font_size)
+                glyph_w = _glyph_w(display_text, font)
+
+        # Still overflowing at the floor size → truncate with an ellipsis (glyph-based).
+        if glyph_w > fit_w and len(display_text) > 1:
+            while len(display_text) > 1 and _glyph_w(display_text + "…", font) > fit_w:
                 display_text = display_text[:-1]
-                truncated = True
-            if truncated and len(display_text) > 3:
-                display_text = display_text[:-1] + '…'
+            display_text = display_text + "…"
 
-        # Alignment offset (applied before rotation; or used to compute pivot)
-        text_bbox = draw.textbbox((0, 0), display_text, font=font)
-        text_w = text_bbox[2] - text_bbox[0]
+        # Final drawn width (includes spacing) used for the layer + anchor pivot.
+        text_w = _full_w(display_text, font)
 
-        if cfg.rotation == 0.0:
-            # --- No rotation: existing path ---
-            if cfg.align in ("center", "right"):
-                if cfg.align == "center":
-                    ref_w = max_width if max_width > 0 else (canvas.width - x)
-                    x = x + (ref_w - text_w) // 2
-                else:
-                    ref_w = max_width if max_width > 0 else (canvas.width - x)
-                    x = x + ref_w - text_w
-            draw.text((x, y), display_text, font=font, fill=colour_rgba)
-            print(f"DEBUG Text: drew '{display_text}' at ({x},{y}) size={font_size}", flush=True)
+        # --- Render glyphs onto a tight RGBA layer (unified path for every style:
+        # letter spacing, stroke outline, drop shadow, opacity and rotation) ---
+        ascent, descent = font.getmetrics()
+        text_h = ascent + descent
+        # Padding must cover stroke bleed + shadow (blur radius + offset)
+        pad = stroke_w + shadow_blur + max(abs(shadow_dx), abs(shadow_dy)) + 4
+        layer_w = max(1, text_w + pad * 2)
+        layer_h = max(1, text_h + pad * 2)
+        origin_x, origin_y = pad, pad
+
+        def _draw_glyphs(target_draw, ox, oy, fill, s_w, s_fill):
+            """Draw display_text at (ox, oy) top-left, honouring letter spacing."""
+            if spacing:
+                cx = float(ox)
+                for ch in display_text:
+                    target_draw.text((int(round(cx)), oy), ch, font=font, fill=fill,
+                                     stroke_width=s_w, stroke_fill=s_fill)
+                    cx += draw.textlength(ch, font=font) + spacing
+            else:
+                target_draw.text((ox, oy), display_text, font=font, fill=fill,
+                                 stroke_width=s_w, stroke_fill=s_fill)
+
+        text_layer = Image.new("RGBA", (layer_w, layer_h), (0, 0, 0, 0))
+
+        # 1) Drop shadow — glyphs in shadow colour on their own layer, blurred & offset
+        if shadow_blur > 0 or shadow_dx != 0 or shadow_dy != 0:
+            shadow_layer = Image.new("RGBA", (layer_w, layer_h), (0, 0, 0, 0))
+            _draw_glyphs(ImageDraw.Draw(shadow_layer), origin_x + shadow_dx, origin_y + shadow_dy,
+                         shadow_rgba, stroke_w, shadow_rgba if stroke_w else None)
+            if shadow_blur > 0:
+                shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(shadow_blur))
+            text_layer = Image.alpha_composite(text_layer, shadow_layer)
+
+        # 2) Main text with optional stroke outline
+        _draw_glyphs(ImageDraw.Draw(text_layer), origin_x, origin_y, fill_rgba,
+                     stroke_w, stroke_rgba if stroke_w else None)
+
+        # 3) Opacity — scale the whole layer's alpha
+        if opacity < 1.0:
+            alpha = text_layer.getchannel("A").point(lambda a: int(a * opacity))
+            text_layer.putalpha(alpha)
+
+        # --- Placement: pivot = the alignment edge at the top of the text ---
+        if cfg.align == "center":
+            pivot_x = origin_x + text_w / 2.0
+        elif cfg.align == "right":
+            pivot_x = origin_x + text_w
         else:
-            # --- Rotation path: render to a tight RGBA layer, rotate, paste ---
+            pivot_x = float(origin_x)
+        pivot_y = float(origin_y)
+
+        if cfg.rotation != 0.0:
             import math
-            pad = 4  # small padding so edge pixels are not clipped
-            text_h = text_bbox[3] - text_bbox[1]
-            layer_w = text_w + pad * 2
-            layer_h = text_h + pad * 2
-            text_layer = Image.new("RGBA", (layer_w, layer_h), (0, 0, 0, 0))
-            layer_draw = ImageDraw.Draw(text_layer)
-            # Draw text offset by bbox origin + padding so it sits at (pad, pad)
-            layer_draw.text((-text_bbox[0] + pad, -text_bbox[1] + pad), display_text, font=font, fill=colour_rgba)
-
-            # Determine pivot point within the unrotated layer based on align
-            if cfg.align == "center":
-                pivot_x = layer_w / 2.0
-            elif cfg.align == "right":
-                pivot_x = layer_w - pad
-            else:  # left
-                pivot_x = float(pad)
-            pivot_y = float(pad)  # top of text
-
-            # PIL rotates CCW for positive angle; expand=True grows the bbox to fit
             rotated = text_layer.rotate(cfg.rotation, expand=True, resample=Image.Resampling.BICUBIC)
-
-            # After rotate(expand=True), the original layer center maps to rotated center.
-            # Compute where the pivot point lands in the rotated bitmap.
             a = math.radians(cfg.rotation)
             cx, cy = layer_w / 2.0, layer_h / 2.0
-            dx, dy = pivot_x - cx, pivot_y - cy
-            rdx = dx * math.cos(a) + dy * math.sin(a)
-            rdy = -dx * math.sin(a) + dy * math.cos(a)
-            pivot_in_rotated_x = rotated.width / 2.0 + rdx
-            pivot_in_rotated_y = rotated.height / 2.0 + rdy
+            ddx, ddy = pivot_x - cx, pivot_y - cy
+            rdx = ddx * math.cos(a) + ddy * math.sin(a)
+            rdy = -ddx * math.sin(a) + ddy * math.cos(a)
+            paste_x = int(round(x - (rotated.width / 2.0 + rdx)))
+            paste_y = int(round(y - (rotated.height / 2.0 + rdy)))
+            # paste (not alpha_composite) so negative/overflow offsets clip safely
+            canvas.paste(rotated, (paste_x, paste_y), rotated)
+        else:
+            paste_x = int(round(x - pivot_x))
+            paste_y = int(round(y - pivot_y))
+            canvas.paste(text_layer, (paste_x, paste_y), text_layer)
 
-            # Paste so the rotated pivot lands at the configured (x, y)
-            paste_x = int(round(x - pivot_in_rotated_x))
-            paste_y = int(round(y - pivot_in_rotated_y))
-            canvas.alpha_composite(rotated, (max(0, paste_x), max(0, paste_y)))
-            print(f"DEBUG Text (rotated {cfg.rotation}°): drew '{display_text}' pivot=({x},{y}) size={font_size}", flush=True)
+        print(f"DEBUG Text: '{display_text}' align={cfg.align} anchor=({x},{y}) size={font_size} "
+              f"spacing={spacing:.1f} stroke={stroke_w} shadow_blur={shadow_blur} opacity={opacity:.2f}", flush=True)
 
     def compose_final(
         self,
@@ -635,7 +786,24 @@ class ComposeService:
         
         # Sort slots (original slots, not scaled yet)
         sorted_slots_meta = sorted(template_meta.slots, key=lambda s: s.z_index)
-        
+
+        # If the template defines no slots but we have a subject to place, synthesise
+        # a full-canvas slot so the person is still composited instead of silently
+        # dropped. This is the norm for baseline templates (the subject is grounded
+        # on the baseline across the whole scene) and for sticker templates where the
+        # admin didn't draw an explicit slot.
+        if not sorted_slots_meta and stickers and processing_mode in ("sticker", "pre_extracted"):
+            sorted_slots_meta = [SlotMetadata(
+                slot_id="auto",
+                x=0, y=0,
+                width=template_meta.width,
+                height=template_meta.height,
+                anchor_target_x=None,
+                anchor_target_y=None,
+                z_index=0,
+            )]
+            print("DEBUG Compose: no slots defined — synthesised a full-canvas slot so the subject is placed", flush=True)
+
         fit_mode = "cover" if processing_mode == "frame" else "contain"
         
         # Prepare stickers with their corresponding slots
@@ -685,16 +853,73 @@ class ComposeService:
             
             img_w_orig, img_h_orig = sticker_img.size
 
-            # Fit sticker to slot (scaled)
-            sticker_scaled = self.fit_sticker_to_slot(
-                sticker_img,
-                s_slot, # Use scaled slot
-                fit_mode,
-                face_height=landmarks_scaled.face_height if landmarks_scaled else None # Use scaled face height
+            # === BASELINE PLACEMENT (robust, mask-driven) ===
+            # Active only for anchor_mode == "baseline" with a baseline config and
+            # no manual user_position (the Adjust editor deliberately overrides).
+            # Scales the cutout so its body width == the baseline segment length and
+            # drops its body-bottom onto the baseline — no face detection involved.
+            use_baseline = (
+                not user_position
+                and template_meta.anchor_mode == "baseline"
+                and template_meta.baseline is not None
             )
+            m_subj = analyze_subject(sticker_img) if use_baseline else None
+            if use_baseline and m_subj is None:
+                print("DEBUG Compose: baseline mode but mask degenerate — falling back to standard placement", flush=True)
+                use_baseline = False
+
+            if use_baseline:
+                bl = template_meta.baseline
+                bx1 = float(bl.get("x1", 0))
+                bx2 = float(bl.get("x2", template_meta.width))
+                by = float(bl.get("y", template_meta.height))
+                # Baseline values are template-native; lift to the upscaled canvas.
+                target_w = abs(bx2 - bx1) * res_multiplier
+                base_cx = ((bx1 + bx2) / 2.0) * res_multiplier
+                base_y = by * res_multiplier
+
+                scale = target_w / m_subj.width if m_subj.width > 0 else 1.0
+                scale = max(s_slot.min_zoom, min(s_slot.max_zoom, scale))
+
+                # Head-fit safety: the subject's top (head crown, cutout row 0) lands
+                # at paste_y = base_y - bottom_y*scale. If that goes above the canvas
+                # top the head clips, so cap the scale to keep it within a small
+                # headroom. This overrides the width target (head visible > exact width).
+                top_margin = canvas_h * 0.02
+                if m_subj.bottom_y > 0:
+                    max_scale_fit = (base_y - top_margin) / m_subj.bottom_y
+                    if 0 < max_scale_fit < scale:
+                        print(f"DEBUG Compose: baseline head-fit clamp scale {scale:.2f} -> {max_scale_fit:.2f}", flush=True)
+                        scale = max_scale_fit
+
+                new_w = max(1, int(round(sticker_img.width * scale)))
+                new_h = max(1, int(round(sticker_img.height * scale)))
+                sticker_scaled = self._resample(sticker_img, new_w, new_h, reason=f"baseline scale={scale:.2f}")
+
+                cx_scaled = m_subj.center_x * scale
+                bottom_scaled = m_subj.bottom_y * scale
+                x = int(round(base_cx - cx_scaled))
+                y = int(round(base_y - bottom_scaled))
+                print(
+                    f"DEBUG Compose: baseline place: subj(w={m_subj.width:.0f},cx={m_subj.center_x:.0f},"
+                    f"by={m_subj.bottom_y}) scale={scale:.2f} target_w={target_w:.0f} -> paste=({x},{y}) "
+                    f"base=({base_cx:.0f},{base_y:.0f})",
+                    flush=True,
+                )
+
+            # Fit sticker to slot (scaled) — skipped when baseline already placed it
+            if not use_baseline:
+                sticker_scaled = self.fit_sticker_to_slot(
+                    sticker_img,
+                    s_slot, # Use scaled slot
+                    fit_mode,
+                    face_height=landmarks_scaled.face_height if landmarks_scaled else None # Use scaled face height
+                )
 
             # Calculate Placement
-            if user_position:
+            if use_baseline:
+                pass  # x, y, sticker_scaled already computed above
+            elif user_position:
                 user_scale = user_position.get('scale', 1.0)
                 user_x = user_position.get('x', 0)
                 user_y = user_position.get('y', 0)
@@ -764,8 +989,13 @@ class ComposeService:
                 # apply_stroke pads by (width + 2) on each side; scale to match canvas resolution.
                 _stroke_pad = int((_get_width() + 2) * res_multiplier)
             print(f"DEBUG Compose: Sticker placement: sticker_scaled={sticker_scaled.size}, paste_at=({x},{y}), slot=({s_slot.x},{s_slot.y},{s_slot.width},{s_slot.height}), canvas={canvas.size}, stroke_pad={_stroke_pad}", flush=True)
-            sx, sy = s_slot.x, s_slot.y
-            sw, sh = s_slot.width, s_slot.height
+            # Baseline mode clips to the full canvas (the subject is meant to stand
+            # in the whole scene); other modes clip to the slot rectangle.
+            if use_baseline:
+                sx, sy, sw, sh = 0, 0, canvas_w, canvas_h
+            else:
+                sx, sy = s_slot.x, s_slot.y
+                sw, sh = s_slot.width, s_slot.height
             clip_l = max(0, (sx - _stroke_pad) - x)
             clip_t = max(0, (sy - _stroke_pad) - y)
             clip_r = min(sticker_scaled.width, (sx + sw + _stroke_pad) - x)

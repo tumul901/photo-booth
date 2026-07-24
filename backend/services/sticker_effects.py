@@ -19,10 +19,147 @@ handled directly in rembg_service._remove_sync().
 
 import time
 
+import numpy as np
 from PIL import Image, ImageColor, ImageFilter
 
 # Exported for validation. Keep in sync with feature_flags_service.STICKER_EFFECT_NAMES.
 EFFECT_NAMES = ("none", "stroke", "shadow", "unsharp", "alpha_matting")
+
+
+def clean_alpha_islands(
+    img: Image.Image,
+    low_alpha_cut: int = 12,
+    min_area_frac: float = 0.02,
+) -> Image.Image:
+    """
+    Kill segmentation ghosts: faint translucent leftovers of the original
+    background and small disconnected blobs that rembg sometimes keeps.
+
+    Two steps:
+      1. Hard-zero any pixel below `low_alpha_cut` — removes the near-transparent
+         haze that shows up as a ghost when composited on a new background.
+      2. Keep only connected foreground components whose area is >= `min_area_frac`
+         of the largest component. The subject is one big blob; floating shadow
+         chunks / a bystander's arm in the corner are small and get dropped.
+
+    Conservative by design — `min_area_frac=0.02` keeps anything substantial
+    (e.g. a raised hand that's still 2%+ of the subject) while removing specks.
+    """
+    t0 = time.perf_counter()
+    if img.mode != "RGBA":
+        img = img.convert("RGBA")
+    rgba = np.array(img)
+    alpha = rgba[..., 3]
+
+    alpha = np.where(alpha < low_alpha_cut, 0, alpha)
+    binary = (alpha > 0).astype(np.uint8)
+
+    dropped = 0
+    try:
+        import cv2
+        num, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+        if num > 1:
+            areas = stats[1:, cv2.CC_STAT_AREA]  # skip background label 0
+            largest = int(areas.max())
+            keep = np.zeros(num, dtype=bool)
+            for lbl in range(1, num):
+                if stats[lbl, cv2.CC_STAT_AREA] >= min_area_frac * largest:
+                    keep[lbl] = True
+                else:
+                    dropped += 1
+            keep_mask = keep[labels]
+            alpha = np.where(keep_mask, alpha, 0)
+    except Exception as e:
+        print(f"WARNING: clean_alpha_islands cv2 unavailable ({e}); low-alpha cut only", flush=True)
+
+    rgba[..., 3] = alpha
+    print(
+        f"EFFECT [clean_islands] low_cut={low_alpha_cut} min_area_frac={min_area_frac} "
+        f"dropped={dropped} blobs {img.width}x{img.height} in {(time.perf_counter() - t0) * 1000:.0f}ms",
+        flush=True,
+    )
+    return Image.fromarray(rgba, "RGBA")
+
+
+def decontaminate_edges(
+    img: Image.Image,
+    grow: int = 4,
+    shrink: int = 1,
+    core_alpha: int = 200,
+) -> Image.Image:
+    """
+    Remove the colored "bleed"/halo around a cutout — background-independent.
+
+    The segmentation network leaves a soft, semi-transparent ring of pixels at the
+    subject boundary whose RGB still contains the *original* background colour. When
+    composited onto a new template that ring shows up as a halo (e.g. a dark fringe
+    around a white shirt on a yellow background).
+
+    Fix, in two cheap passes (works for any background, no green screen needed):
+      1. `shrink` — erode the alpha by N px to cut the outermost, most-contaminated ring.
+      2. `grow`   — extrapolate the *foreground* colour outward into the remaining edge
+                    band (grass-fire fill from the opaque core). Any soft edge that
+                    survives now carries the subject's own colour, so it blends into the
+                    person instead of flashing the old background.
+
+    Only RGB of edge pixels is changed; the (eroded) alpha continues to provide the
+    soft matte, so hair/edges stay smooth.
+
+    Args:
+      grow       — px of foreground-colour extrapolation into the edge band
+      shrink     — px of alpha erosion to trim the outer contaminated ring (0 = off)
+      core_alpha — pixels with alpha >= this are treated as trusted foreground colour
+    """
+    t0 = time.perf_counter()
+    if img.mode != "RGBA":
+        img = img.convert("RGBA")
+
+    rgba = np.array(img)
+    rgb = rgba[..., :3].astype(np.float32)
+    alpha = rgba[..., 3]
+
+    # 1) erode alpha to remove the outermost contaminated ring
+    out_alpha = alpha
+    if shrink > 0:
+        try:
+            import cv2
+            k = np.ones((3, 3), np.uint8)
+            out_alpha = cv2.erode(alpha, k, iterations=shrink)
+        except Exception:
+            # Pillow fallback: MinFilter shrinks the bright (opaque) region
+            size = shrink * 2 + 1
+            out_alpha = np.asarray(Image.fromarray(alpha).filter(ImageFilter.MinFilter(size)))
+
+    # 2) grow foreground colour outward (grass-fire fill) so the surviving soft edge
+    #    takes the subject's colour rather than the old background's.
+    known = (alpha >= core_alpha).astype(np.float32)
+    if known.any():
+        try:
+            import cv2
+            blur = lambda a: cv2.blur(a, (3, 3))
+        except Exception:
+            def blur(a):
+                return np.asarray(
+                    Image.fromarray(a.astype(np.float32)).filter(ImageFilter.BoxBlur(1)),
+                    dtype=np.float32,
+                )
+        for _ in range(max(0, grow)):
+            num = blur(rgb * known[..., None])
+            den = blur(known)
+            newmask = (den > 1e-3) & (known < 0.5)
+            if not newmask.any():
+                break
+            filled = num / (den[..., None] + 1e-6)
+            rgb[newmask] = filled[newmask]
+            known[newmask] = 1.0
+
+    result = np.dstack([np.clip(rgb, 0, 255).astype(np.uint8), out_alpha]).astype(np.uint8)
+    print(
+        f"EFFECT [decontaminate] grow={grow} shrink={shrink} "
+        f"{img.width}x{img.height} in {(time.perf_counter() - t0) * 1000:.0f}ms",
+        flush=True,
+    )
+    return Image.fromarray(result, "RGBA")
 
 
 def apply_stroke(

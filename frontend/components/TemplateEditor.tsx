@@ -42,6 +42,15 @@ interface TextConfig {
   align: 'left' | 'center' | 'right';
   uppercase: boolean;
   rotation: number;
+  // Extended styling
+  letterSpacing: number;   // inter-character spacing, px (can be negative)
+  strokeWidth: number;     // outline width, px (0 = none)
+  strokeColor: string;
+  shadowBlur: number;      // drop-shadow blur radius, px (0 = none)
+  shadowColor: string;
+  shadowOffsetX: number;
+  shadowOffsetY: number;
+  opacity: number;         // 0-100
 }
 
 const defaultTextConfig = (): TextConfig => ({
@@ -55,15 +64,27 @@ const defaultTextConfig = (): TextConfig => ({
   align: 'left',
   uppercase: false,
   rotation: 0,
+  letterSpacing: 0,
+  strokeWidth: 0,
+  strokeColor: '#000000',
+  shadowBlur: 0,
+  shadowColor: '#000000',
+  shadowOffsetX: 0,
+  shadowOffsetY: 0,
+  opacity: 100,
 });
 
 interface SnapGuide {
   axis: 'x' | 'y'; // 'x' = vertical line, 'y' = horizontal line
   position: number; // in image (unscaled) coordinates
+  label?: string;   // e.g. 'center', '⅓', 'edge' — shown on the guide
 }
 
 const SNAP_THRESHOLD = 12; // px in image space
 
+// Instagram-story style snapping: the dragged box's left/center/right edges snap
+// to the canvas edges, center and rule-of-thirds lines (same for top/mid/bottom).
+// Corners emerge naturally when an X ref and a Y ref both catch at once.
 function computeSnap(
   nx: number, ny: number,
   fgW: number, fgH: number,
@@ -71,6 +92,12 @@ function computeSnap(
 ): { snappedX: number; snappedY: number; guides: SnapGuide[] } {
   const xRefs = [0, canvasW / 3, canvasW / 2, (2 * canvasW) / 3, canvasW];
   const yRefs = [0, canvasH / 3, canvasH / 2, (2 * canvasH) / 3, canvasH];
+
+  const near = (a: number, b: number) => Math.abs(a - b) < 0.5;
+  const xLabel = (r: number) =>
+    near(r, 0) || near(r, canvasW) ? 'edge' : near(r, canvasW / 2) ? 'center' : '⅓';
+  const yLabel = (r: number) =>
+    near(r, 0) || near(r, canvasH) ? 'edge' : near(r, canvasH / 2) ? 'center' : '⅓';
 
   let bestDX = 0, minDX = SNAP_THRESHOLD + 1, bestXRef = 0;
   for (const a of [nx, nx + fgW / 2, nx + fgW]) {
@@ -91,8 +118,8 @@ function computeSnap(
   const snappedX = minDX < SNAP_THRESHOLD ? nx + bestDX : nx;
   const snappedY = minDY < SNAP_THRESHOLD ? ny + bestDY : ny;
   const guides: SnapGuide[] = [];
-  if (minDX < SNAP_THRESHOLD) guides.push({ axis: 'x', position: bestXRef });
-  if (minDY < SNAP_THRESHOLD) guides.push({ axis: 'y', position: bestYRef });
+  if (minDX < SNAP_THRESHOLD) guides.push({ axis: 'x', position: bestXRef, label: xLabel(bestXRef) });
+  if (minDY < SNAP_THRESHOLD) guides.push({ axis: 'y', position: bestYRef, label: yLabel(bestYRef) });
   return { snappedX, snappedY, guides };
 }
 
@@ -104,7 +131,8 @@ interface TemplateConfig {
   stickerFilter: 'none' | 'bw' | 'sketch';
   pngUrl: string;
   fg_path?: string;
-  anchorMode: 'face_center' | 'eyes' | 'none';
+  anchorMode: 'face_center' | 'eyes' | 'none' | 'full_frame' | 'baseline';
+  baseline?: { x1: number; x2: number; y: number } | null;
   dimensions: { width: number; height: number };
   slots: SlotConfig[];
   desiredFaceRatio: number;
@@ -131,7 +159,9 @@ interface TemplateEditorProps {
   onCancel: () => void;
 }
 
-type EditorMode = 'select' | 'draw' | 'anchor' | 'fg';
+type EditorMode = 'select' | 'draw' | 'anchor' | 'fg' | 'baseline';
+
+interface Baseline { x1: number; x2: number; y: number }
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -172,13 +202,22 @@ export default function TemplateEditor({
   const [templateType, setTemplateType] = useState<'frame' | 'sticker' | 'magazine'>('sticker');
   const [compositeMode, setCompositeMode] = useState<'background' | 'overlay' | 'magazine'>('background');
   const [stickerFilter, setStickerFilter] = useState<'none' | 'bw' | 'sketch'>('none');
-  const [anchorMode, setAnchorMode] = useState<'face_center' | 'eyes' | 'none'>('face_center');
+  const [anchorMode, setAnchorMode] = useState<'face_center' | 'eyes' | 'none' | 'full_frame' | 'baseline'>('face_center');
+
+  // Baseline placement: one horizontal segment encoding subject bottom (y),
+  // horizontal center (midpoint) and target width (length). `baselineDraft` is
+  // the live segment during a drag.
+  const [baseline, setBaseline] = useState<Baseline | null>(null);
+  const [baselineDraft, setBaselineDraft] = useState<Baseline | null>(null);
+  const isDrawingBaseline = useRef(false);
   const [desiredFaceRatio, setDesiredFaceRatio] = useState(0.25);
   const [minZoom, setMinZoom] = useState(0.5);
   const [maxZoom, setMaxZoom] = useState(2.5);
   const [showVisualGuide, setShowVisualGuide] = useState(false);
   const [allowManualPositioning, setAllowManualPositioning] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
+  // % of the template PNG that is transparent (its "photo window"). ~0 = solid card.
+  const [pngTransparentPct, setPngTransparentPct] = useState<number | null>(null);
 
   // Text overlay configs (magazine + sticker/luggage card)
   const [nameTextConfig, setNameTextConfig] = useState<TextConfig>(defaultTextConfig());
@@ -188,6 +227,23 @@ export default function TemplateEditor({
 
   // Custom fonts
   const [fonts, setFonts] = useState<FontItem[]>([]);
+  // Fonts successfully loaded into the browser (via FontFace) so the canvas can
+  // preview text in the exact typeface the backend composites with.
+  const [loadedFontNames, setLoadedFontNames] = useState<Set<string>>(new Set());
+  const attemptedFontsRef = useRef<Set<string>>(new Set());
+
+  // Sample strings shown inside the WYSIWYG text boxes so the admin sees real
+  // extent/wrapping instead of guessing from a symbolic marker.
+  const [namePreview, setNamePreview] = useState('Rajesh Kumar');
+  const [designationPreview, setDesignationPreview] = useState('Marketing Head');
+  const [uploadingFont, setUploadingFont] = useState(false);
+
+  // Screen-space (axis-aligned) hit rectangles for the drawn text boxes, refreshed
+  // each redraw so the whole box is grabbable — not just a tiny dot.
+  const textHitRectsRef = useRef<Record<'name' | 'designation', { x: number; y: number; w: number; h: number } | null>>({ name: null, designation: null });
+  // Offset between the grabbed point and the text anchor, so dragging doesn't snap
+  // the anchor to the cursor (the box stays under the finger where you grabbed it).
+  const textDragOffsetRef = useRef<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
 
   // Luggage card printing mode
   const [luggageCardMode, setLuggageCardMode] = useState(false);
@@ -205,6 +261,12 @@ export default function TemplateEditor({
   const [activeGuides, setActiveGuides] = useState<SnapGuide[]>([]);
   const fgDragAnchorRef = useRef<{ mouseX: number; mouseY: number; startX: number; startY: number } | null>(null);
 
+  // Magnet snapping (edges/center/thirds). Toggleable so the admin can "lock in"
+  // an exact position without the guides pulling it around.
+  const [snapEnabled, setSnapEnabled] = useState(true);
+  // Live cursor position (image-native px), shown in the ruler readout HUD.
+  const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(null);
+
   // Load available custom fonts
   useEffect(() => {
     fetch(`${API_BASE_URL}/api/admin/fonts`)
@@ -212,6 +274,31 @@ export default function TemplateEditor({
       .then(d => setFonts(d.fonts ?? []))
       .catch(() => {});
   }, []);
+
+  // Register each custom font in the browser so text previews render in the real
+  // typeface. Family is namespaced ("tpl-<name>") so it can't collide with an
+  // installed system font and so fallback detection stays exact.
+  useEffect(() => {
+    if (!fonts.length || typeof (document as any).fonts?.add !== 'function') return;
+    fonts.forEach(f => {
+      if (attemptedFontsRef.current.has(f.name)) return;
+      attemptedFontsRef.current.add(f.name);
+      try {
+        const url = `${API_BASE_URL}/api/admin/fonts/${encodeURIComponent(f.name)}/file`;
+        const face = new FontFace(`tpl-${f.name}`, `url(${url})`);
+        face.load()
+          .then(loaded => {
+            (document as any).fonts.add(loaded);
+            setLoadedFontNames(prev => {
+              const next = new Set(prev);
+              next.add(f.name);
+              return next;
+            });
+          })
+          .catch(() => { /* font stays as sans-serif fallback in preview */ });
+      } catch { /* FontFace unsupported — fallback preview */ }
+    });
+  }, [fonts]);
 
   // Load FG image whenever compositeMode becomes 'magazine'
   useEffect(() => {
@@ -239,6 +326,8 @@ export default function TemplateEditor({
         const config = await res.json();
         console.log('Loaded existing config:', config);
 
+        if (typeof config._pngTransparentPct === 'number') setPngTransparentPct(config._pngTransparentPct);
+
         // Apply loaded config to state
         if (config.templateType) setTemplateType(config.templateType);
         if (config.compositeMode) setCompositeMode(config.compositeMode);
@@ -251,6 +340,14 @@ export default function TemplateEditor({
         if (typeof config.allowManualPositioning === 'boolean') setAllowManualPositioning(config.allowManualPositioning);
         if (config.fg_offset && typeof config.fg_offset === 'object') {
           setFgOffset({ x: config.fg_offset.x || 0, y: config.fg_offset.y || 0 });
+        }
+        if (config.baseline && typeof config.baseline === 'object'
+            && typeof config.baseline.y === 'number') {
+          setBaseline({
+            x1: config.baseline.x1 ?? 0,
+            x2: config.baseline.x2 ?? 0,
+            y: config.baseline.y ?? 0,
+          });
         }
 
         // Load text overlay configs (magazine + sticker/luggage card)
@@ -266,6 +363,14 @@ export default function TemplateEditor({
             align: config.name_text.align ?? 'left',
             uppercase: config.name_text.uppercase ?? false,
             rotation: config.name_text.rotation ?? 0,
+            letterSpacing: config.name_text.letterSpacing ?? 0,
+            strokeWidth: config.name_text.strokeWidth ?? 0,
+            strokeColor: config.name_text.strokeColor ?? '#000000',
+            shadowBlur: config.name_text.shadowBlur ?? 0,
+            shadowColor: config.name_text.shadowColor ?? '#000000',
+            shadowOffsetX: config.name_text.shadowOffsetX ?? 0,
+            shadowOffsetY: config.name_text.shadowOffsetY ?? 0,
+            opacity: config.name_text.opacity ?? 100,
           });
           setHasNameText(true);
         }
@@ -281,6 +386,14 @@ export default function TemplateEditor({
             align: config.designation_text.align ?? 'left',
             uppercase: config.designation_text.uppercase ?? false,
             rotation: config.designation_text.rotation ?? 0,
+            letterSpacing: config.designation_text.letterSpacing ?? 0,
+            strokeWidth: config.designation_text.strokeWidth ?? 0,
+            strokeColor: config.designation_text.strokeColor ?? '#000000',
+            shadowBlur: config.designation_text.shadowBlur ?? 0,
+            shadowColor: config.designation_text.shadowColor ?? '#000000',
+            shadowOffsetX: config.designation_text.shadowOffsetX ?? 0,
+            shadowOffsetY: config.designation_text.shadowOffsetY ?? 0,
+            opacity: config.designation_text.opacity ?? 100,
           });
           setHasDesignationText(true);
         }
@@ -394,14 +507,25 @@ export default function TemplateEditor({
     const img = imageRef.current;
     
     if (!canvas || !ctx || !img || !imageLoaded) return;
-    
-    // Set canvas size
-    canvas.width = imageDimensions.width * scale;
-    canvas.height = imageDimensions.height * scale;
-    
-    // Clear and draw image
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    // HiDPI-aware sizing: the backing store is rendered at device pixels (×dpr)
+    // while CSS keeps the on-screen size, so the image isn't upscaled/blurred on
+    // Retina/4K/Windows-scaled displays. All drawing below stays in CSS px because
+    // we scale the context by dpr once here.
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = imageDimensions.width * scale;
+    const cssH = imageDimensions.height * scale;
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    canvas.style.width = `${cssW}px`;
+    canvas.style.height = `${cssH}px`;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+
+    // Clear and draw image (CSS-pixel coordinate space)
+    ctx.clearRect(0, 0, cssW, cssH);
+    ctx.drawImage(img, 0, 0, cssW, cssH);
     
     // Draw existing slots
     slots.forEach((slot, index) => {
@@ -456,6 +580,50 @@ export default function TemplateEditor({
       ctx.fillText(`Slot ${index + 1}`, slot.x * scale + 5, slot.y * scale + 18);
     });
     
+    // Draw baseline segment (live draft takes precedence while dragging)
+    const blToDraw = baselineDraft || baseline;
+    if (blToDraw) {
+      const x1 = blToDraw.x1 * scale;
+      const x2 = blToDraw.x2 * scale;
+      const y = blToDraw.y * scale;
+      const lx = Math.min(x1, x2);
+      const rx = Math.max(x1, x2);
+      const midx = (x1 + x2) / 2;
+      ctx.save();
+      // the line
+      ctx.strokeStyle = '#22d3ee';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo(lx, y);
+      ctx.lineTo(rx, y);
+      ctx.stroke();
+      // endpoint handles
+      ctx.fillStyle = '#22d3ee';
+      for (const ex of [lx, rx]) {
+        ctx.beginPath();
+        ctx.arc(ex, y, 6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // center tick (vertical)
+      ctx.strokeStyle = '#fbbf24';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(midx, y - 14);
+      ctx.lineTo(midx, y + 14);
+      ctx.stroke();
+      // width label
+      const widthPx = Math.round(Math.abs(blToDraw.x2 - blToDraw.x1));
+      const label = `baseline · width ${widthPx}px`;
+      ctx.font = 'bold 13px sans-serif';
+      const tw = ctx.measureText(label).width;
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(midx - tw / 2 - 5, y + 16, tw + 10, 20);
+      ctx.fillStyle = '#22d3ee';
+      ctx.fillText(label, midx - tw / 2, y + 30);
+      ctx.restore();
+    }
+
     // Draw FG overlay for magazine mode (semi-transparent so slots are still visible)
     if (fgImageRef && showFgOverlay && compositeMode === 'magazine') {
       const fgDrawW = (fgImageRef.naturalWidth || imageDimensions.width) * scale;
@@ -465,103 +633,256 @@ export default function TemplateEditor({
       ctx.globalAlpha = 1.0;
     }
 
-    // Draw snap alignment guides (shown while dragging FG)
+    // Draw snap alignment guides (Instagram-style: bright magenta lines + label)
     if (activeGuides.length > 0) {
       ctx.save();
-      ctx.strokeStyle = '#00d4ff';
+      ctx.strokeStyle = '#ff2d78';
       ctx.lineWidth = 1.5;
-      ctx.globalAlpha = 0.9;
+      ctx.shadowColor = 'rgba(255,45,120,0.7)';
+      ctx.shadowBlur = 4;
       ctx.setLineDash([]);
+      const glabel = Math.max(9, 10 * scale);
       for (const guide of activeGuides) {
         ctx.beginPath();
         if (guide.axis === 'x') {
           ctx.moveTo(guide.position * scale, 0);
-          ctx.lineTo(guide.position * scale, canvas.height);
+          ctx.lineTo(guide.position * scale, cssH);
         } else {
           ctx.moveTo(0, guide.position * scale);
-          ctx.lineTo(canvas.width, guide.position * scale);
+          ctx.lineTo(cssW, guide.position * scale);
         }
         ctx.stroke();
+      }
+      // Labels (no shadow, on chips) so it's obvious what you snapped to
+      ctx.shadowBlur = 0;
+      ctx.font = `600 ${glabel}px sans-serif`;
+      ctx.textBaseline = 'top';
+      for (const guide of activeGuides) {
+        if (!guide.label) continue;
+        const w = ctx.measureText(guide.label).width;
+        let lx: number, ly: number;
+        if (guide.axis === 'x') { lx = guide.position * scale + 4; ly = 4; }
+        else { lx = 4; ly = guide.position * scale + 4; }
+        ctx.fillStyle = 'rgba(255,45,120,0.92)';
+        ctx.fillRect(lx - 2, ly - 1, w + 6, glabel + 4);
+        ctx.fillStyle = '#fff';
+        ctx.fillText(guide.label, lx + 1, ly + 1);
       }
       ctx.restore();
     }
 
-    // Draw text overlay position indicators (any composite mode when overlays are enabled)
+    // Draw text overlays as true WYSIWYG boxes: the sample string is rendered in
+    // the real font, size, colour, alignment and rotation the backend will use,
+    // so the anchor is no longer guesswork. Placement math mirrors
+    // compose.py::_draw_magazine_text exactly (align offset + rotation pivot).
+    textHitRectsRef.current = { name: null, designation: null };
     if (hasNameText || hasDesignationText) {
-      const drawTextMarker = (cfg: TextConfig, label: string, color: string, isDragging: boolean) => {
-        const tx = cfg.x * scale;
-        const ty = cfg.y * scale;
+      const drawTextBox = (
+        key: 'name' | 'designation',
+        cfg: TextConfig,
+        sample: string,
+        accent: string,
+        isDragging: boolean,
+      ) => {
+        const raw = (sample && sample.trim()) ? sample : 'Sample';
+        const text = cfg.uppercase ? raw.toUpperCase() : raw;
+        const family = loadedFontNames.has(cfg.fontName) ? `"tpl-${cfg.fontName}"` : 'sans-serif';
+        const anchorX = cfg.x * scale;
+        const anchorY = cfg.y * scale;
+
         ctx.save();
-        ctx.translate(tx, ty);
-        // Show rotation direction visually
-        if (cfg.rotation !== 0) {
-          const rad = -cfg.rotation * Math.PI / 180; // canvas CW = PIL CCW
-          ctx.rotate(rad);
+        ctx.textBaseline = 'top';
+        const spacingPx = (cfg.letterSpacing || 0) * scale;
+        const setSpacing = (v: number) => { try { (ctx as unknown as { letterSpacing: string }).letterSpacing = `${v}px`; } catch { /* older browser */ } };
+
+        // Fit width (screen px) — mirrors compose.py: maxWidth if set, else the
+        // space from the anchor to the canvas edge based on alignment.
+        const marginPx = 8 * scale;
+        let fitW: number;
+        if (cfg.maxWidth > 0) fitW = cfg.maxWidth * scale;
+        else if (cfg.align === 'left') fitW = (imageDimensions.width - cfg.x) * scale - marginPx;
+        else if (cfg.align === 'right') fitW = cfg.x * scale - marginPx;
+        else fitW = 2 * Math.min(cfg.x, imageDimensions.width - cfg.x) * scale - marginPx;
+        fitW = Math.max(fitW, 1);
+
+        // Auto-shrink the font based on GLYPH width only (spacing off), so letter
+        // spacing never collapses the font — matches compose.py.
+        setSpacing(0);
+        let fontPx = Math.max(2, cfg.fontSize * scale);
+        const minFontPx = Math.max(8 * scale, fontPx * 0.4);
+        ctx.font = `${fontPx}px ${family}`;
+        const glyphW = ctx.measureText(text).width;
+        if (glyphW > fitW && glyphW > 0) {
+          fontPx = Math.max(minFontPx, fontPx * fitW / glyphW);
+          ctx.font = `${fontPx}px ${family}`;
         }
-        ctx.strokeStyle = color;
-        ctx.fillStyle = color;
-        ctx.lineWidth = isDragging ? 3 : 2;
-        ctx.globalAlpha = isDragging ? 1 : 0.85;
-        ctx.setLineDash([4, 4]);
-        ctx.beginPath();
-        ctx.moveTo(-10, 0);
-        ctx.lineTo(120, 0);
-        ctx.stroke();
+        // Now apply spacing and measure the real drawn width (box + pivot).
+        setSpacing(spacingPx);
+        const textW = ctx.measureText(text).width;
+        const boxH = fontPx * 1.18;               // approx line box (cosmetic)
+
+        // Anchor-pivot for ALL alignments (rotated or not): the anchor is the
+        // align edge — left→left edge, center→center, right→right edge.
+        const localLeft = cfg.align === 'center' ? -textW / 2 : cfg.align === 'right' ? -textW : 0;
+
+        // Max-width boundary guide (non-rotated), drawn around the fit region.
+        if (cfg.maxWidth > 0 && cfg.rotation === 0) {
+          ctx.save();
+          ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+          ctx.setLineDash([2, 3]);
+          ctx.lineWidth = 1;
+          ctx.strokeRect(anchorX + localLeft, anchorY, fitW, boxH);
+          ctx.restore();
+        }
+
+        ctx.translate(anchorX, anchorY);
+        if (cfg.rotation !== 0) ctx.rotate(-cfg.rotation * Math.PI / 180); // canvas CW = PIL CCW
+
+        // The text box outline
+        ctx.setLineDash(isDragging ? [] : [5, 4]);
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = isDragging ? 2.5 : 1.5;
+        ctx.strokeRect(localLeft, 0, textW, boxH);
         ctx.setLineDash([]);
-        ctx.beginPath();
-        ctx.moveTo(0, -8);
-        ctx.lineTo(0, 8);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(0, 0, isDragging ? 7 : 5, 0, Math.PI * 2);
-        ctx.fill();
-        const fontSize = Math.max(11, 13 * scale);
-        ctx.font = `bold ${fontSize}px sans-serif`;
-        const textW = ctx.measureText(label).width;
-        ctx.fillStyle = 'rgba(0,0,0,0.55)';
-        ctx.beginPath();
-        ctx.roundRect(10, -fontSize - 2, textW + 8, fontSize + 4, 3);
-        ctx.fill();
-        ctx.fillStyle = color;
-        ctx.fillText(label, 14, -4);
-        if (cfg.rotation !== 0) {
-          ctx.fillStyle = color;
-          ctx.font = `${Math.max(9, 10 * scale)}px sans-serif`;
-          ctx.fillText(`${cfg.rotation.toFixed(0)}°`, 14, fontSize + 2);
-        }
+        // Faint fill so an empty/short box is still visible
+        ctx.fillStyle = accent;
+        ctx.globalAlpha = isDragging ? 0.16 : 0.08;
+        ctx.fillRect(localLeft, 0, textW, boxH);
         ctx.globalAlpha = 1;
+
+        // The sample text itself — with opacity, drop shadow and stroke outline
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, Math.min(100, cfg.opacity ?? 100)) / 100;
+        if ((cfg.shadowBlur ?? 0) > 0 || (cfg.shadowOffsetX ?? 0) !== 0 || (cfg.shadowOffsetY ?? 0) !== 0) {
+          ctx.shadowColor = cfg.shadowColor || '#000000';
+          ctx.shadowBlur = (cfg.shadowBlur || 0) * scale;
+          ctx.shadowOffsetX = (cfg.shadowOffsetX || 0) * scale;
+          ctx.shadowOffsetY = (cfg.shadowOffsetY || 0) * scale;
+        }
+        if ((cfg.strokeWidth ?? 0) > 0) {
+          // Canvas centers the stroke; ×2 approximates PIL's outward stroke_width.
+          ctx.lineWidth = (cfg.strokeWidth || 0) * 2 * scale;
+          ctx.strokeStyle = cfg.strokeColor || '#000000';
+          ctx.lineJoin = 'round';
+          ctx.strokeText(text, localLeft, 0);
+          // Don't let the fill cast a second shadow over the stroke
+          ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0;
+        }
+        ctx.fillStyle = cfg.color;
+        ctx.fillText(text, localLeft, 0);
+        ctx.restore();
+
+        // Compute the axis-aligned screen bbox of the (possibly rotated) box for hit-testing
+        const corners = [
+          [localLeft, 0], [localLeft + textW, 0],
+          [localLeft, boxH], [localLeft + textW, boxH],
+        ];
+        const rad = cfg.rotation !== 0 ? -cfg.rotation * Math.PI / 180 : 0;
+        const cos = Math.cos(rad), sin = Math.sin(rad);
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const [lx, ly] of corners) {
+          const sx = anchorX + lx * cos - ly * sin;
+          const sy = anchorY + lx * sin + ly * cos;
+          minX = Math.min(minX, sx); maxX = Math.max(maxX, sx);
+          minY = Math.min(minY, sy); maxY = Math.max(maxY, sy);
+        }
+        ctx.restore();
+
+        // Ensure a minimum grab area around the anchor so tiny text (e.g. a 60px
+        // font on a 5000px canvas) is still visible and draggable.
+        const MINHIT = 26;
+        const hx = Math.min(minX, anchorX - MINHIT / 2);
+        const hy = Math.min(minY, anchorY - MINHIT / 2);
+        const hx1 = Math.max(maxX, anchorX + MINHIT / 2);
+        const hy1 = Math.max(maxY, anchorY + MINHIT / 2);
+        textHitRectsRef.current[key] = { x: hx, y: hy, w: hx1 - hx, h: hy1 - hy };
+        const tinyOnScreen = (maxY - minY) < 12 || (maxX - minX) < 12;
+
+        // Anchor handle + label chip in un-rotated screen space (always readable).
+        ctx.save();
+        // When the real text is too small to see, draw a fixed dashed affordance box
+        // around the anchor so the operator can always find & grab it.
+        if (tinyOnScreen) {
+          ctx.strokeStyle = accent;
+          ctx.setLineDash([4, 3]);
+          ctx.lineWidth = 1.5;
+          ctx.globalAlpha = 0.9;
+          ctx.strokeRect(hx, hy, hx1 - hx, hy1 - hy);
+          ctx.setLineDash([]);
+          ctx.globalAlpha = 1;
+        }
+        ctx.beginPath();
+        ctx.arc(anchorX, anchorY, isDragging ? 6 : 4.5, 0, Math.PI * 2);
+        ctx.fillStyle = accent;
+        ctx.fill();
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        const chipFont = Math.max(10, 11 * scale);
+        ctx.font = `bold ${chipFont}px sans-serif`;
+        const label = key === 'name' ? 'NAME ▸' : 'DESIG ▸';
+        const chipW = ctx.measureText(label).width;
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.beginPath();
+        ctx.roundRect(anchorX + 8, anchorY - chipFont - 6, chipW + 8, chipFont + 5, 3);
+        ctx.fill();
+        ctx.fillStyle = accent;
+        ctx.fillText(label, anchorX + 12, anchorY - chipFont - 3);
         ctx.restore();
       };
-      if (hasNameText) drawTextMarker(nameTextConfig, 'NAME', '#facc15', draggingText === 'name');
-      if (hasDesignationText) drawTextMarker(designationTextConfig, 'DESIGNATION', '#4ade80', draggingText === 'designation');
+      if (hasNameText) drawTextBox('name', nameTextConfig, namePreview, '#facc15', draggingText === 'name');
+      if (hasDesignationText) drawTextBox('designation', designationTextConfig, designationPreview, '#4ade80', draggingText === 'designation');
     }
 
-    // Ruler overlay for luggage card mode
+    // Ruler overlay for luggage card mode — a faint 10mm grid plus readable
+    // numbered ticks on BOTH axes (the numbers are millimetres).
     if (luggageCardMode && imageDimensions.width > 0) {
-      const mmPerPx = printWidthMm / imageDimensions.width;
-      const pxPer10mm = (10 / mmPerPx) * scale;
       ctx.save();
-      ctx.strokeStyle = 'rgba(100,180,255,0.35)';
+      // Faint grid so it doesn't fight the artwork
+      ctx.strokeStyle = 'rgba(120,190,255,0.16)';
       ctx.lineWidth = 1;
-      ctx.setLineDash([3, 3]);
+      ctx.setLineDash([3, 4]);
       for (let xmm = 10; xmm < printWidthMm; xmm += 10) {
-        const xpx = (xmm / printWidthMm) * canvas.width;
-        ctx.beginPath(); ctx.moveTo(xpx, 0); ctx.lineTo(xpx, canvas.height); ctx.stroke();
+        const xpx = (xmm / printWidthMm) * cssW;
+        ctx.beginPath(); ctx.moveTo(xpx, 0); ctx.lineTo(xpx, cssH); ctx.stroke();
       }
       for (let ymm = 10; ymm < printHeightMm; ymm += 10) {
-        const ypx = (ymm / printHeightMm) * canvas.height;
-        ctx.beginPath(); ctx.moveTo(0, ypx); ctx.lineTo(canvas.width, ypx); ctx.stroke();
+        const ypx = (ymm / printHeightMm) * cssH;
+        ctx.beginPath(); ctx.moveTo(0, ypx); ctx.lineTo(cssW, ypx); ctx.stroke();
       }
       ctx.setLineDash([]);
-      // mm labels along top
-      ctx.fillStyle = 'rgba(100,180,255,0.7)';
-      ctx.font = `${Math.max(8, 9 * scale)}px sans-serif`;
+
+      // Numbered ticks — bright, with a short solid tick at the edge
+      const lblFont = Math.max(9, 10 * scale);
+      ctx.font = `600 ${lblFont}px monospace`;
+      ctx.textBaseline = 'top';
+      ctx.textAlign = 'left';
+      ctx.strokeStyle = 'rgba(150,205,255,0.85)';
+      ctx.lineWidth = 1.5;
+      const tick = Math.max(5, 6 * scale);
+      const drawLabel = (txt: string, lx: number, ly: number) => {
+        const w = ctx.measureText(txt).width;
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillRect(lx - 1, ly - 1, w + 3, lblFont + 2);
+        ctx.fillStyle = 'rgba(190,225,255,0.98)';
+        ctx.fillText(txt, lx, ly);
+      };
       for (let xmm = 10; xmm < printWidthMm; xmm += 10) {
-        const xpx = (xmm / printWidthMm) * canvas.width;
-        ctx.fillText(`${xmm}`, xpx + 2, 10 * scale);
+        const xpx = (xmm / printWidthMm) * cssW;
+        ctx.beginPath(); ctx.moveTo(xpx, 0); ctx.lineTo(xpx, tick); ctx.stroke();
+        drawLabel(`${xmm}`, xpx + 2, tick + 1);
       }
+      for (let ymm = 10; ymm < printHeightMm; ymm += 10) {
+        const ypx = (ymm / printHeightMm) * cssH;
+        ctx.beginPath(); ctx.moveTo(0, ypx); ctx.lineTo(tick, ypx); ctx.stroke();
+        drawLabel(`${ymm}`, tick + 2, ypx + 1);
+      }
+      // Unit badge at the origin so it's unambiguous what the numbers mean
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(0, 0, ctx.measureText('mm').width + 8, lblFont + 4);
+      ctx.fillStyle = 'rgba(190,225,255,0.98)';
+      ctx.fillText('mm', 3, 2);
       ctx.restore();
-      void pxPer10mm; // suppress unused warning
     }
 
     // Draw current drawing rectangle
@@ -577,7 +898,7 @@ export default function TemplateEditor({
       ctx.strokeRect(x, y, w, h);
       ctx.setLineDash([]);
     }
-  }, [imageLoaded, imageDimensions, scale, slots, selectedSlotIndex, isDrawing, mode, drawStart, drawCurrent, fgImageRef, showFgOverlay, compositeMode, hasNameText, nameTextConfig, hasDesignationText, designationTextConfig, draggingText, fgOffset, activeGuides, luggageCardMode, printWidthMm, printHeightMm]);
+  }, [imageLoaded, imageDimensions, scale, slots, selectedSlotIndex, isDrawing, mode, drawStart, drawCurrent, fgImageRef, showFgOverlay, compositeMode, hasNameText, nameTextConfig, hasDesignationText, designationTextConfig, draggingText, fgOffset, activeGuides, luggageCardMode, printWidthMm, printHeightMm, baseline, baselineDraft, loadedFontNames, namePreview, designationPreview]);
 
   // Redraw on state changes
   useEffect(() => {
@@ -599,12 +920,32 @@ export default function TemplateEditor({
     };
   };
 
-  // Hit-test: is (x,y) in image coords near a text marker? Returns grab target or null.
-  const hitTestTextMarker = (x: number, y: number): 'name' | 'designation' | null => {
-    const HIT = 20; // px in image space
-    if (hasNameText && Math.abs(x - nameTextConfig.x) < HIT && Math.abs(y - nameTextConfig.y) < HIT) return 'name';
-    if (hasDesignationText && Math.abs(x - designationTextConfig.x) < HIT && Math.abs(y - designationTextConfig.y) < HIT) return 'designation';
+  // Mouse position in canvas screen (device) pixels — used for text-box hit-testing.
+  const getScreenCoords = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  };
+
+  // Hit-test the drawn text boxes (whole box is grabbable, not a tiny dot).
+  // sx, sy are screen-space canvas pixels. Anchor dot gets a small extra pad.
+  const hitTestTextMarker = (sx: number, sy: number): 'name' | 'designation' | null => {
+    const PAD = 6;
+    const inRect = (r: { x: number; y: number; w: number; h: number } | null) =>
+      !!r && sx >= r.x - PAD && sx <= r.x + r.w + PAD && sy >= r.y - PAD && sy <= r.y + r.h + PAD;
+    if (hasNameText && inRect(textHitRectsRef.current.name)) return 'name';
+    if (hasDesignationText && inRect(textHitRectsRef.current.designation)) return 'designation';
     return null;
+  };
+
+  // Snap a baseline to the template edges when an endpoint/line lands near one.
+  // Lets "drag to the bottom" land flush on the last pixel (no gap under the subject).
+  const snapBaselineToEdges = (b: Baseline): Baseline => {
+    const W = imageDimensions.width, H = imageDimensions.height;
+    const t = Math.max(8, Math.round(Math.min(W, H) * 0.02)); // ~2% of the short side
+    const snap = (v: number, max: number) => (v < t ? 0 : Math.abs(v - max) < t ? max : v);
+    return { x1: snap(b.x1, W), x2: snap(b.x2, W), y: snap(b.y, H) };
   };
 
   // Mouse handlers
@@ -618,10 +959,21 @@ export default function TemplateEditor({
       return;
     }
 
-    // Check for text marker drag (works whenever overlays are enabled)
+    // Baseline draw: mousedown sets one end + the locked Y, drag sets the other end
+    if (mode === 'baseline') {
+      isDrawingBaseline.current = true;
+      setBaselineDraft(snapBaselineToEdges({ x1: Math.round(coords.x), x2: Math.round(coords.x), y: Math.round(coords.y) }));
+      return;
+    }
+
+    // Check for text box drag (works whenever overlays are enabled)
     if (hasNameText || hasDesignationText) {
-      const hit = hitTestTextMarker(coords.x, coords.y);
+      const screen = getScreenCoords(e);
+      const hit = hitTestTextMarker(screen.x, screen.y);
       if (hit) {
+        // Preserve where inside the box the user grabbed, so the anchor doesn't jump.
+        const cfg = hit === 'name' ? nameTextConfig : designationTextConfig;
+        textDragOffsetRef.current = { dx: cfg.x - coords.x, dy: cfg.y - coords.y };
         setDraggingText(hit);
         return;
       }
@@ -654,6 +1006,17 @@ export default function TemplateEditor({
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const coords = getImageCoords(e);
+    // Live position readout (clamped to the canvas for sane numbers)
+    setHoverPos({
+      x: Math.max(0, Math.min(imageDimensions.width, Math.round(coords.x))),
+      y: Math.max(0, Math.min(imageDimensions.height, Math.round(coords.y))),
+    });
+
+    // Baseline draw: Y stays locked to the mousedown row (always horizontal)
+    if (mode === 'baseline' && isDrawingBaseline.current) {
+      setBaselineDraft(prev => prev ? snapBaselineToEdges({ ...prev, x2: Math.round(coords.x) }) : prev);
+      return;
+    }
 
     if (mode === 'fg' && fgDragAnchorRef.current) {
       const fgW = fgImageRef?.naturalWidth || imageDimensions.width;
@@ -662,27 +1025,53 @@ export default function TemplateEditor({
       const dy = coords.y - fgDragAnchorRef.current.mouseY;
       const nx = fgDragAnchorRef.current.startX + dx;
       const ny = fgDragAnchorRef.current.startY + dy;
-      const { snappedX, snappedY, guides } = computeSnap(nx, ny, fgW, fgH, imageDimensions.width, imageDimensions.height);
-      setFgOffset({ x: Math.round(snappedX), y: Math.round(snappedY) });
-      setActiveGuides(guides);
+      if (snapEnabled) {
+        const { snappedX, snappedY, guides } = computeSnap(nx, ny, fgW, fgH, imageDimensions.width, imageDimensions.height);
+        setFgOffset({ x: Math.round(snappedX), y: Math.round(snappedY) });
+        setActiveGuides(guides);
+      } else {
+        setFgOffset({ x: Math.round(nx), y: Math.round(ny) });
+        setActiveGuides([]);
+      }
       return;
     }
 
     if (draggingText) {
-      const rawX = Math.max(0, coords.x);
-      const rawY = Math.max(0, coords.y);
-      // Snap to grid (canvas edges/thirds/center) + snap to the OTHER text marker
-      const otherCfg = draggingText === 'name' ? designationTextConfig : nameTextConfig;
-      const otherEnabled = draggingText === 'name' ? hasDesignationText : hasNameText;
-      const { snappedX, snappedY, guides } = computeSnap(
-        rawX, rawY, 1, 1, imageDimensions.width, imageDimensions.height,
-      );
-      // Also check cross-marker snap
-      let finalX = snappedX, finalY = snappedY;
-      const crossGuides: SnapGuide[] = [...guides];
-      if (otherEnabled) {
-        if (Math.abs(rawX - otherCfg.x) < 12) { finalX = otherCfg.x; crossGuides.push({ axis: 'x', position: otherCfg.x }); }
-        if (Math.abs(rawY - otherCfg.y) < 12) { finalY = otherCfg.y; crossGuides.push({ axis: 'y', position: otherCfg.y }); }
+      // Apply the grab offset so the box stays under the cursor where it was grabbed.
+      const rawX = Math.max(0, coords.x + textDragOffsetRef.current.dx);
+      const rawY = Math.max(0, coords.y + textDragOffsetRef.current.dy);
+      const cfg = draggingText === 'name' ? nameTextConfig : designationTextConfig;
+      let finalX = rawX, finalY = rawY;
+      const crossGuides: SnapGuide[] = [];
+      if (snapEnabled) {
+        const rect = textHitRectsRef.current[draggingText];
+        if (rect && cfg.rotation === 0) {
+          // Snap the whole box (left/center/right + top/mid/bottom) like IG.
+          const w = rect.w / scale;
+          const h = rect.h / scale;
+          // anchor → box-left, depending on alignment
+          const aOff = cfg.align === 'center' ? w / 2 : cfg.align === 'right' ? w : 0;
+          const { snappedX, snappedY, guides } = computeSnap(
+            rawX - aOff, rawY, w, h, imageDimensions.width, imageDimensions.height,
+          );
+          finalX = snappedX + aOff;
+          finalY = snappedY;
+          crossGuides.push(...guides);
+        } else {
+          // Rotated text: snap the anchor point only.
+          const { snappedX, snappedY, guides } = computeSnap(
+            rawX, rawY, 1, 1, imageDimensions.width, imageDimensions.height,
+          );
+          finalX = snappedX; finalY = snappedY;
+          crossGuides.push(...guides);
+        }
+        // Also snap to the OTHER text marker's anchor (align both texts)
+        const otherCfg = draggingText === 'name' ? designationTextConfig : nameTextConfig;
+        const otherEnabled = draggingText === 'name' ? hasDesignationText : hasNameText;
+        if (otherEnabled) {
+          if (Math.abs(finalX - otherCfg.x) < 12) { finalX = otherCfg.x; crossGuides.push({ axis: 'x', position: otherCfg.x, label: 'align' }); }
+          if (Math.abs(finalY - otherCfg.y) < 12) { finalY = otherCfg.y; crossGuides.push({ axis: 'y', position: otherCfg.y, label: 'align' }); }
+        }
       }
       setActiveGuides(crossGuides);
       const nx = Math.round(finalX);
@@ -698,6 +1087,24 @@ export default function TemplateEditor({
   };
 
   const handleMouseUp = () => {
+    // Baseline draw: commit if the segment is long enough, else discard
+    if (mode === 'baseline' && isDrawingBaseline.current) {
+      isDrawingBaseline.current = false;
+      setBaselineDraft(draft => {
+        if (draft && Math.abs(draft.x2 - draft.x1) > 20) {
+          const lo = Math.min(draft.x1, draft.x2);
+          const hi = Math.max(draft.x1, draft.x2);
+          setBaseline(snapBaselineToEdges({ x1: lo, x2: hi, y: draft.y }));
+          // Drawing a baseline IS the intent to use baseline placement — the
+          // backend only honours the baseline when anchorMode === 'baseline'
+          // (compose.py). Flip it here so the setting can't silently disagree.
+          setAnchorMode('baseline');
+        }
+        return null;
+      });
+      return;
+    }
+
     if (mode === 'fg' && fgDragAnchorRef.current) {
       fgDragAnchorRef.current = null;
       setIsDraggingFg(false);
@@ -752,10 +1159,43 @@ export default function TemplateEditor({
     }
   };
 
+  // Upload a .ttf/.otf font, refresh the font list, and hand back the new name.
+  const handleFontUpload = useCallback(async (fileList: FileList | null, onDone: (name: string) => void) => {
+    const file = fileList?.[0];
+    if (!file) return;
+    const lower = file.name.toLowerCase();
+    if (!lower.endsWith('.ttf') && !lower.endsWith('.otf')) {
+      alert('Please choose a .ttf or .otf font file.');
+      return;
+    }
+    setUploadingFont(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch(`${API_BASE_URL}/api/admin/fonts`, { method: 'POST', body: fd });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Upload failed');
+      }
+      const data = await res.json();
+      // Refresh the font list (the load effect will register the new FontFace).
+      const listData = await fetch(`${API_BASE_URL}/api/admin/fonts`).then(r => r.json()).catch(() => null);
+      if (listData) setFonts(listData.fonts ?? []);
+      onDone(data.name);
+    } catch (e) {
+      alert(`Font upload failed: ${e instanceof Error ? e.message : 'unknown error'}`);
+    } finally {
+      setUploadingFont(false);
+    }
+  }, []);
+
   // Save configuration
   const handleSave = () => {
-    if (templateType === 'sticker' && slots.length === 0) {
-      alert('Please draw at least one slot for Sticker templates');
+    // Sticker templates place the subject via a slot OR a baseline. Only block the
+    // save when neither exists (the backend auto-synthesises a full-canvas slot,
+    // so a baseline alone is a perfectly valid, common setup).
+    if (templateType === 'sticker' && slots.length === 0 && !baseline) {
+      alert('Draw a Slot, or a Baseline, so the photo has somewhere to go.');
       return;
     }
 
@@ -778,6 +1218,7 @@ export default function TemplateEditor({
       maxZoom,
       showVisualGuide,
       allowManualPositioning,
+      baseline: baseline ?? null,
       fg_offset: fgOffset,
       name_text: hasNameText ? nameTextConfig : undefined,
       designation_text: hasDesignationText ? designationTextConfig : undefined,
@@ -824,7 +1265,7 @@ export default function TemplateEditor({
             >
               ✏️ Draw Slot
             </button>
-            <button 
+            <button
               className={`${styles.toolButton} ${mode === 'anchor' ? styles.active : ''}`}
               onClick={() => setMode('anchor')}
               disabled={selectedSlotIndex === null}
@@ -832,6 +1273,22 @@ export default function TemplateEditor({
             >
               🎯 Set Anchor
             </button>
+            <button
+              className={`${styles.toolButton} ${mode === 'baseline' ? styles.active : ''}`}
+              onClick={() => setMode('baseline')}
+              title="Draw the baseline: the subject's bottom sits on this line, centered on its midpoint, scaled to its length"
+            >
+              📏 Draw Baseline
+            </button>
+            {baseline && (
+              <button
+                className={styles.toolButton}
+                onClick={() => { setBaseline(null); if (anchorMode === 'baseline') setAnchorMode('none'); }}
+                title="Remove the baseline"
+              >
+                ✕ Clear Baseline
+              </button>
+            )}
           </div>
           
           {compositeMode === 'magazine' && (
@@ -859,6 +1316,16 @@ export default function TemplateEditor({
               </button>
             </div>
           )}
+
+          <div className={styles.toolGroup}>
+            <button
+              className={`${styles.toolButton} ${snapEnabled ? styles.active : ''}`}
+              onClick={() => setSnapEnabled(v => !v)}
+              title="Magnet snapping to edges, center and thirds. Turn off to place exactly where you drop."
+            >
+              {snapEnabled ? '🧲 Snap: ON' : '🧲 Snap: OFF'}
+            </button>
+          </div>
 
           <div className={styles.toolGroup}>
             <button
@@ -896,15 +1363,36 @@ export default function TemplateEditor({
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
-            style={{ cursor: draggingText ? 'grabbing' : mode === 'fg' ? (isDraggingFg ? 'grabbing' : 'grab') : mode === 'draw' ? 'crosshair' : mode === 'anchor' ? 'pointer' : 'default' }}
+            onMouseLeave={() => { handleMouseUp(); setHoverPos(null); }}
+            style={{ cursor: draggingText ? 'grabbing' : mode === 'fg' ? (isDraggingFg ? 'grabbing' : 'grab') : mode === 'draw' || mode === 'baseline' ? 'crosshair' : mode === 'anchor' ? 'pointer' : 'default' }}
           />
-          
+
+          {/* Live position readout — tells you exactly what coordinates you're at */}
+          {hoverPos && imageLoaded && (
+            <div
+              style={{
+                position: 'absolute', top: 8, right: 8, zIndex: 5,
+                background: 'rgba(0,0,0,0.72)', color: '#e5e7eb',
+                font: '600 12px/1.4 monospace', padding: '5px 9px', borderRadius: 6,
+                pointerEvents: 'none', letterSpacing: '0.02em',
+              }}
+            >
+              <div>x {hoverPos.x} · y {hoverPos.y} px</div>
+              {luggageCardMode && imageDimensions.width > 0 && (
+                <div style={{ color: '#7dd3fc' }}>
+                  {(hoverPos.x * printWidthMm / imageDimensions.width).toFixed(1)} ·{' '}
+                  {(hoverPos.y * printHeightMm / imageDimensions.height).toFixed(1)} mm
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Instructions overlay */}
           <div className={styles.instructions}>
             {mode === 'draw' && '🖱️ Drag to draw a slot rectangle'}
             {mode === 'anchor' && selectedSlotIndex !== null && '🎯 Click inside the slot to set face anchor point'}
             {mode === 'select' && '👆 Click on a slot to select it'}
+            {mode === 'baseline' && '📏 Drag a horizontal line where the subject should stand — bottom sits on it, width = its length. Snaps flush to template edges.'}
             {mode === 'fg' && `📐 Drag to reposition FG overlay — cyan guides snap to center, edges & thirds  (offset: ${fgOffset.x}, ${fgOffset.y})`}
           </div>
         </div>
@@ -1037,6 +1525,28 @@ export default function TemplateEditor({
             </select>
           </div>
 
+          {/* Guardrail: overlay only works when the PNG has a transparent photo window.
+              A solid card in overlay mode covers the photo entirely. */}
+          {compositeMode === 'overlay' && pngTransparentPct !== null && pngTransparentPct < 1 && (
+            <div className={styles.settingRow} style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.5)', borderRadius: 6, padding: '8px 10px' }}>
+              <span style={{ fontSize: '0.78rem', color: '#fca5a5' }}>
+                ⚠️ This template is a <strong>solid image</strong> (no transparent photo window),
+                so <strong>Overlay</strong> mode will cover the photo completely and hide the person.
+                Switch to <strong>Background (template behind sticker)</strong> and use
+                <strong> Sticker (Remove BG)</strong> type so the person is placed on top.
+              </span>
+            </div>
+          )}
+          {templateType === 'sticker' && slots.length === 0 && !baseline && (
+            <div className={styles.settingRow} style={{ background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.4)', borderRadius: 6, padding: '8px 10px' }}>
+              <span style={{ fontSize: '0.78rem', color: '#fcd34d' }}>
+                ℹ️ No slot or baseline defined. The person will be auto-placed full-canvas
+                (bottom-centered). Draw a <strong>Baseline</strong> for precise grounding, or a
+                <strong> Slot</strong> to confine the photo area.
+              </span>
+            </div>
+          )}
+
           {compositeMode === 'magazine' && (
             <div className={styles.settingRow} style={{ background: 'rgba(99,102,241,0.1)', borderRadius: 6, padding: '8px 10px' }}>
               <span style={{ fontSize: '0.78rem', color: '#a5b4fc' }}>
@@ -1048,7 +1558,8 @@ export default function TemplateEditor({
           {/* Text Overlays — available for all template types */}
           <h3 className={styles.settingsTitle} style={{ marginTop: '1rem' }}>Text Overlays</h3>
           <p className={styles.hint} style={{ marginBottom: 8 }}>
-            Drag the markers on the canvas to position. Hold Shift while dragging to disable snap.
+            The dashed box shows the real text — font, size, colour, alignment & rotation.
+            Drag the box to position it; the round handle is the anchor point.
           </p>
 
           {/* Helper to render one text overlay section */}
@@ -1060,23 +1571,43 @@ export default function TemplateEditor({
               setEnabled: (v: boolean) => void,
               cfg: TextConfig,
               setCfg: (v: TextConfig) => void,
+              preview: string,
+              setPreview: (v: string) => void,
             ) => (
               <div style={{ marginBottom: 8 }}>
                 <div className={styles.settingRow}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                    <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} style={{ width: 16, height: 16 }} />
+                    <input type="checkbox" checked={enabled} onChange={e => {
+                      const on = e.target.checked;
+                      setEnabled(on);
+                      // Give a visible default size on big canvases (60px is invisible on a 5000px card)
+                      if (on && cfg.fontSize === 60 && imageDimensions.height > 1500) {
+                        setCfg({ ...cfg, fontSize: Math.round(imageDimensions.height * 0.045) });
+                      }
+                    }} style={{ width: 16, height: 16 }} />
                     <strong style={{ color: accentColor }}>{label}</strong>
                   </label>
                 </div>
                 {enabled && (
                   <div style={{ paddingLeft: 12, borderLeft: `2px solid ${accentColor}`, marginBottom: 8 }}>
                     <div className={styles.settingRow}>
-                      <label>Position (X, Y) — drag on canvas:</label>
+                      <label>Preview text (sample only):</label>
+                      <input type="text" value={preview} onChange={e => setPreview(e.target.value)} placeholder="Sample name" style={{ width: '100%' }} />
+                    </div>
+                    <div className={styles.settingRow}>
+                      <label>Anchor (X, Y) — drag the box on canvas:</label>
                       <div style={{ display: 'flex', gap: 6 }}>
                         <input type="number" value={cfg.x} onChange={e => setCfg({ ...cfg, x: +e.target.value })} style={{ width: 70 }} />
                         <input type="number" value={cfg.y} onChange={e => setCfg({ ...cfg, y: +e.target.value })} style={{ width: 70 }} />
                       </div>
                     </div>
+                    <p className={styles.hint} style={{ margin: '0 0 6px' }}>
+                      {cfg.align === 'left'
+                        ? 'X, Y = where the first letter starts (top-left).'
+                        : cfg.align === 'center'
+                        ? 'Text is centered in the width from X rightwards; Y = top.'
+                        : 'Text is right-aligned within the width from X; Y = top.'}
+                    </p>
                     <div className={styles.settingRow}>
                       <label>Rotation (°):</label>
                       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -1092,8 +1623,26 @@ export default function TemplateEditor({
                     </div>
                     <div className={styles.settingRow}>
                       <label>Font Size:</label>
-                      <input type="number" value={cfg.fontSize} onChange={e => setCfg({ ...cfg, fontSize: +e.target.value })} style={{ width: 70 }} />
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <input type="number" value={cfg.fontSize} onChange={e => setCfg({ ...cfg, fontSize: +e.target.value })} style={{ width: 70 }} />
+                        <span>px</span>
+                        <button
+                          type="button"
+                          onClick={() => setCfg({ ...cfg, fontSize: Math.max(12, Math.round(imageDimensions.height * 0.045)) })}
+                          title="Set a sensible size (~4.5% of card height) for this template's resolution"
+                          style={{ fontSize: '0.72rem', padding: '3px 8px' }}
+                        >
+                          Auto size
+                        </button>
+                      </div>
                     </div>
+                    <p className={styles.hint} style={{ margin: '0 0 6px' }}>
+                      ≈ {imageDimensions.height ? (cfg.fontSize / imageDimensions.height * 100).toFixed(1) : '—'}% of card height
+                      {' · '}canvas {imageDimensions.width}×{imageDimensions.height}px
+                      {imageDimensions.height > 0 && cfg.fontSize / imageDimensions.height < 0.015 && (
+                        <span style={{ color: '#fca5a5' }}> — likely too small to see; try “Auto size”.</span>
+                      )}
+                    </p>
                     <div className={styles.settingRow}>
                       <label>Color:</label>
                       <input type="color" value={cfg.color} onChange={e => setCfg({ ...cfg, color: e.target.value })} />
@@ -1101,10 +1650,28 @@ export default function TemplateEditor({
                     </div>
                     <div className={styles.settingRow}>
                       <label>Font:</label>
-                      <select value={cfg.fontName} onChange={e => setCfg({ ...cfg, fontName: e.target.value, fontPath: '' })}>
-                        <option value="">Default</option>
-                        {fonts.map(f => <option key={f.name} value={f.name}>{f.name}</option>)}
-                      </select>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <select value={cfg.fontName} onChange={e => setCfg({ ...cfg, fontName: e.target.value, fontPath: '' })}>
+                          <option value="">Default</option>
+                          {fonts.map(f => <option key={f.name} value={f.name}>{f.name}</option>)}
+                        </select>
+                        <label
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: uploadingFont ? 'wait' : 'pointer', fontSize: '0.75rem', padding: '4px 8px', border: `1px solid ${accentColor}`, borderRadius: 4, color: accentColor, whiteSpace: 'nowrap' }}
+                          title="Upload a .ttf or .otf font"
+                        >
+                          {uploadingFont ? '⏳ Uploading…' : '⬆ Upload font'}
+                          <input
+                            type="file"
+                            accept=".ttf,.otf,font/ttf,font/otf"
+                            disabled={uploadingFont}
+                            style={{ display: 'none' }}
+                            onChange={e => {
+                              handleFontUpload(e.target.files, (name) => setCfg({ ...cfg, fontName: name, fontPath: '' }));
+                              e.target.value = '';
+                            }}
+                          />
+                        </label>
+                      </div>
                     </div>
                     {!cfg.fontName && (
                       <div className={styles.settingRow}>
@@ -1130,14 +1697,50 @@ export default function TemplateEditor({
                         Uppercase
                       </label>
                     </div>
+                    <div className={styles.settingRow}>
+                      <label>Letter Spacing:</label>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <input type="range" min={-10} max={40} step={0.5} value={cfg.letterSpacing}
+                          onChange={e => setCfg({ ...cfg, letterSpacing: +e.target.value })} style={{ width: 110 }} />
+                        <input type="number" value={cfg.letterSpacing} step={0.5}
+                          onChange={e => setCfg({ ...cfg, letterSpacing: +e.target.value })} style={{ width: 56 }} />
+                        <span>px</span>
+                      </div>
+                    </div>
+                    <div className={styles.settingRow}>
+                      <label>Opacity: {cfg.opacity}%</label>
+                      <input type="range" min={0} max={100} step={1} value={cfg.opacity}
+                        onChange={e => setCfg({ ...cfg, opacity: +e.target.value })} style={{ width: 140 }} />
+                    </div>
+                    <div className={styles.settingRow}>
+                      <label>Outline (width / color):</label>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <input type="number" min={0} value={cfg.strokeWidth} title="Outline width in px (0 = off)"
+                          onChange={e => setCfg({ ...cfg, strokeWidth: Math.max(0, +e.target.value) })} style={{ width: 56 }} />
+                        <span>px</span>
+                        <input type="color" value={cfg.strokeColor} onChange={e => setCfg({ ...cfg, strokeColor: e.target.value })} />
+                      </div>
+                    </div>
+                    <div className={styles.settingRow}>
+                      <label>Shadow (blur / X / Y / color):</label>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <input type="number" min={0} value={cfg.shadowBlur} title="Blur radius in px (0 = off)"
+                          onChange={e => setCfg({ ...cfg, shadowBlur: Math.max(0, +e.target.value) })} style={{ width: 46 }} />
+                        <input type="number" value={cfg.shadowOffsetX} title="Horizontal offset"
+                          onChange={e => setCfg({ ...cfg, shadowOffsetX: +e.target.value })} style={{ width: 46 }} />
+                        <input type="number" value={cfg.shadowOffsetY} title="Vertical offset"
+                          onChange={e => setCfg({ ...cfg, shadowOffsetY: +e.target.value })} style={{ width: 46 }} />
+                        <input type="color" value={cfg.shadowColor} onChange={e => setCfg({ ...cfg, shadowColor: e.target.value })} />
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
             );
             return (
               <>
-                {renderOverlay('Name Text', '#facc15', hasNameText, setHasNameText, nameTextConfig, setNameTextConfig)}
-                {renderOverlay('Designation Text', '#4ade80', hasDesignationText, setHasDesignationText, designationTextConfig, setDesignationTextConfig)}
+                {renderOverlay('Name Text', '#facc15', hasNameText, setHasNameText, nameTextConfig, setNameTextConfig, namePreview, setNamePreview)}
+                {renderOverlay('Designation Text', '#4ade80', hasDesignationText, setHasDesignationText, designationTextConfig, setDesignationTextConfig, designationPreview, setDesignationPreview)}
               </>
             );
           })()}
@@ -1154,12 +1757,24 @@ export default function TemplateEditor({
           <div className={styles.settingRow}>
             <label>Anchor Mode:</label>
             <select value={anchorMode} onChange={e => setAnchorMode(e.target.value as typeof anchorMode)}>
+              <option value="baseline">Baseline (Robust auto-place) ⭐</option>
               <option value="face_center">Face Center</option>
               <option value="eyes">Eyes</option>
               <option value="full_frame">Full Frame (1:1 UI Overlay)</option>
               <option value="none">None (Bottom anchor)</option>
             </select>
           </div>
+
+          {anchorMode === 'baseline' && (
+            <div className={styles.settingRow} style={{ background: 'rgba(34,211,238,0.1)', borderRadius: 6, padding: '8px 10px' }}>
+              <span style={{ fontSize: '0.78rem', color: '#67e8f9' }}>
+                📏 Robust placement: the cutout is auto-scaled & grounded on the baseline (no face detection).
+                {baseline
+                  ? ` Baseline set: width ${Math.abs(baseline.x2 - baseline.x1)}px at y=${baseline.y}. Use “Draw Baseline” to redraw.`
+                  : ' Click “Draw Baseline” above, then drag a horizontal line where the subject should stand.'}
+              </span>
+            </div>
+          )}
           
           <div className={styles.settingRow} style={{ alignItems: 'center', marginTop: '1rem', marginBottom: '1rem' }}>
             <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: '8px' }}>

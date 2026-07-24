@@ -4,7 +4,12 @@
   "templateType": "sticker",
   "compositeMode": "background",
   "pngUrl": "Ranbir-kapoor1 (1).jpg.jpeg",
-  "anchorMode": "none",
+  "png_path": "Ranbir-kapoor1 (1).jpg.jpeg",
+  "fg_path": "",
+  "anchorMode": "baseline",
+  "stickerFilter": "none",
+  "showVisualGuide": false,
+  "allowManualPositioning": false,
   "dimensions": {
     "width": 1920,
     "height": 1080
@@ -20,15 +25,31 @@
         "targetX": 425,
         "targetY": 350
       },
-      "desiredFaceRatio": 0.30,
+      "desiredFaceRatio": 0.3,
       "minZoom": 0.5,
       "maxZoom": 2.5,
       "zIndex": 0
     }
   ],
   "metadata": {
-    "category": "brand",
-    "tags": ["lays", "promo", "chips"],
-    "author": "CloudPlay XP"
-  }
+    "category": "custom",
+    "tags": [],
+    "author": "Admin"
+  },
+  "name_text": {},
+  "designation_text": {},
+  "fg_offset": {
+    "x": 0,
+    "y": 0
+  },
+  "baseline": {
+    "x1": 1113,
+    "x2": 1803,
+    "y": 1080
+  },
+  "luggage_card_mode": false,
+  "print_dpi": 300,
+  "print_width_mm": 86.0,
+  "print_height_mm": 54.0,
+  "output_format": "png"
 }

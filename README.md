@@ -26,9 +26,14 @@ python -m uvicorn main:app --reload
 
 ### Frontend
 
+
 ```bash
 cd frontend
 npm install
+npm run dev
+```
+```bash
+cd frontend
 npm run dev
 ```
 

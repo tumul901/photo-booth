@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useCallback } from 'react';
-import type { GalleryItem } from './GalleryCard';
-import { timeAgo } from './timeAgo';
+import type { GalleryItem } from './GalleryPanel';
 import styles from './LightboxModal.module.css';
 
 interface LightboxModalProps {
@@ -52,15 +51,19 @@ export default function LightboxModal({ items, index, onClose, onNavigate, onDel
         <img src={item.url} alt={item.filename} className={styles.image} />
         <div className={styles.bar}>
           <div className={styles.meta}>
-            <span>{timeAgo(item.last_modified)}</span>
+            {item.guest_name && <span style={{ fontWeight: 600, color: '#fff' }}>{item.guest_name}</span>}
+            {item.guest_phone && <span style={{ color: '#aaa' }}>{item.guest_phone}</span>}
             <span>{(item.size / 1024).toFixed(0)} KB</span>
             {item.template_prefix && (
               <span className={styles.template}>{item.template_prefix}</span>
             )}
+            {item.downloaded_at && (
+              <span style={{ color: '#34d399', fontSize: '0.8rem' }}>Handed over</span>
+            )}
           </div>
           <div className={styles.actions}>
             <a
-              href={item.url}
+              href={item.download_url || `${item.url}?source=app`}
               download={item.filename}
               className={styles.downloadBtn}
               onClick={(e) => e.stopPropagation()}

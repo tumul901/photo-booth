@@ -28,6 +28,8 @@ class FlagsUpdate(BaseModel):
     sticker_effect: str | None = None
     sticker_stroke_color: str | None = None
     sticker_stroke_width: int | None = None
+    capture_form: bool | None = None
+    edge_cleanup: bool | None = None
 
 
 @router.get("/feature-flags")
@@ -91,6 +93,12 @@ async def admin_put_flags(body: FlagsUpdate):
                 detail=f"Stroke width must be between 1 and 20 (got {w}).",
             )
         update["sticker_stroke_width"] = w
+
+    if body.capture_form is not None:
+        update["capture_form"] = body.capture_form
+
+    if body.edge_cleanup is not None:
+        update["edge_cleanup"] = body.edge_cleanup
 
     if not update:
         raise HTTPException(status_code=400, detail="No flags provided to update")

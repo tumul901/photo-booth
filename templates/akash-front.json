@@ -1,0 +1,70 @@
+{
+  "templateId": "akash-front",
+  "name": "akash-front",
+  "templateType": "sticker",
+  "compositeMode": "overlay",
+  "pngUrl": "akash-front.png",
+  "png_path": "akash-front.png",
+  "fg_path": "",
+  "anchorMode": "none",
+  "stickerFilter": "none",
+  "showVisualGuide": false,
+  "allowManualPositioning": false,
+  "dimensions": {
+    "width": 638,
+    "height": 1016
+  },
+  "slots": [
+    {
+      "slotId": "slot1",
+      "x": 78,
+      "y": 94,
+      "width": 515,
+      "height": 633,
+      "anchor": {
+        "targetX": 257,
+        "targetY": 221
+      },
+      "desiredFaceRatio": 0.25,
+      "minZoom": 0.5,
+      "maxZoom": 2.5,
+      "zIndex": 0
+    }
+  ],
+  "metadata": {
+    "category": "custom",
+    "tags": [],
+    "author": "Admin"
+  },
+  "name_text": {
+    "x": 319,
+    "y": 773,
+    "fontSize": 60,
+    "color": "#FFFFFF",
+    "fontPath": "",
+    "fontName": "Gotham_Narrow_Bold",
+    "maxWidth": 0,
+    "align": "center",
+    "uppercase": true,
+    "rotation": 0.0,
+    "letterSpacing": 0.0,
+    "strokeWidth": 0,
+    "strokeColor": "#000000",
+    "shadowBlur": 0,
+    "shadowColor": "#000000",
+    "shadowOffsetX": 0,
+    "shadowOffsetY": 0,
+    "opacity": 100
+  },
+  "designation_text": {},
+  "fg_offset": {
+    "x": 0,
+    "y": 0
+  },
+  "baseline": null,
+  "luggage_card_mode": true,
+  "print_dpi": 300,
+  "print_width_mm": 54.0,
+  "print_height_mm": 86.0,
+  "output_format": "png"
+}

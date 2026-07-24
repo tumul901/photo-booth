@@ -16,6 +16,7 @@ from services.wtm_composer import compose_template
 from services.compose import compose_service, TemplateMetadata, SlotMetadata
 from services.storage_service import storage_service
 from services.stats_service import stats_service
+from services.jobs_service import jobs_service
 
 router = APIRouter(tags=['wtm'])
 
@@ -64,6 +65,8 @@ async def wtm_generate(
     processing_mode: str = Form('sticker'), # 'sticker' or 'pre_extracted'
     wtm_name: str = Form(""),              # person's name (if name overlay configured)
     wtm_designation: str = Form(""),       # person's designation (if configured)
+    guest_name: str = Form(""),            # Capture form: guest's name (optional)
+    guest_phone: str = Form(""),           # Capture form: guest's phone (optional)
 ):
     """
     Composite a guest photo onto a WTM-composed template PNG.
@@ -228,6 +231,17 @@ async def wtm_generate(
         asyncio.create_task(upload_fn())
 
         stats_service.increment_generation('word_template', template_id)
+
+        try:
+            jobs_service.upsert(
+                result.output_id,
+                guest_name=guest_name,
+                guest_phone=guest_phone,
+                template_id=template_id,
+                mode='word_template',
+            )
+        except Exception as je:
+            print(f"WARNING: jobs_service.upsert failed: {je}", flush=True)
 
         print(f"PERF:   TOTAL:     {time.perf_counter() - t_total:.2f}s (upload in background)", flush=True)
         print(f"{'='*50}\n", flush=True)

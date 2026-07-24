@@ -31,16 +31,22 @@ DEFAULTS: dict[str, Any] = {
         "word_template": True,
         "magazine": True,
     },
-    "rembg_profile": "isnet_hi",
+    "rembg_profile": "human_hi",
     "sticker_effect": "none",
     "sticker_stroke_color": "#FFFFFF",
     "sticker_stroke_width": 4,
+    # Edge cleanup: drop segmentation ghosts + decontaminate the soft edge ring so
+    # no old-background halo survives onto the template. Background-independent.
+    "edge_cleanup": True,
+    # Capture form: when true, the booth shows a name+phone form before mode selection.
+    # Defaults OFF so existing events are unaffected.
+    "capture_form": False,
 }
 
 # Valid rembg profile names. Kept in lockstep with services/rembg_service.PROFILES.
 # Duplicated here (instead of imported) to avoid a circular import — rembg_service
 # imports get_rembg_profile() from this module on every cutout call.
-PROFILES_NAMES = ("isnet_hi", "silueta_hi")
+PROFILES_NAMES = ("human_hi", "isnet_hi", "silueta_hi")
 
 # Valid sticker edge effect names. Mirror of sticker_effects.EFFECT_NAMES; duplicated
 # here for the same circular-import reason.
@@ -110,3 +116,7 @@ def get_sticker_stroke_color() -> str:
 
 def get_sticker_stroke_width() -> int:
     return int(get_flags().get("sticker_stroke_width", DEFAULTS["sticker_stroke_width"]))
+
+
+def get_edge_cleanup() -> bool:
+    return bool(get_flags().get("edge_cleanup", DEFAULTS["edge_cleanup"]))

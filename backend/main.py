@@ -15,12 +15,84 @@ from api.feature_flags import router as feature_flags_router
 from config import settings
 
 
+async def _backfill_jobs() -> None:
+    """
+    One-time migration: for every output known to storage but missing from jobs.db,
+    insert a minimal row so the gallery doesn't show blank sections for old photos.
+    Runs in the background so startup latency is unaffected.
+    """
+    import asyncio
+    await asyncio.sleep(2)  # let server finish starting first
+
+    try:
+        from services.jobs_service import jobs_service
+        from services.storage_service import storage_service
+        from services.archive_service import archive_service
+        import time, os
+
+        existing_ids = jobs_service.get_all_ids()
+        provider = storage_service.provider
+
+        items: list[dict] = []
+        if not hasattr(provider, "s3"):
+            # Local storage
+            output_dir = getattr(provider, "output_dir", "outputs")
+            if os.path.isdir(output_dir):
+                for fname in os.listdir(output_dir):
+                    fpath = os.path.join(output_dir, fname)
+                    if not os.path.isfile(fpath):
+                        continue
+                    output_id = os.path.splitext(fname)[0]
+                    stat = os.stat(fpath)
+                    items.append({"output_id": output_id, "created_at": stat.st_mtime, "file_size": stat.st_size})
+        else:
+            paginator = provider.s3.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=provider.bucket, Prefix=provider.prefix):
+                for obj in page.get("Contents", []):
+                    key = obj["Key"]
+                    filename = key.replace(provider.prefix, "", 1)
+                    output_id = os.path.splitext(filename)[0]
+                    items.append({
+                        "output_id": output_id,
+                        "created_at": obj["LastModified"].timestamp(),
+                        "file_size": obj["Size"],
+                    })
+
+        archived_ids = set(archive_service.list_archived())
+        added = 0
+        for item in items:
+            oid = item["output_id"]
+            if oid in existing_ids:
+                continue
+            prefix = oid.rsplit("-", 1)[0] if "-" in oid else oid
+            jobs_service.upsert(
+                oid,
+                template_id=prefix,
+                created_at=item["created_at"],
+                file_size=item["file_size"],
+            )
+            if oid in archived_ids:
+                jobs_service.set_archived(oid, True)
+            added += 1
+
+        if added:
+            print(f"INFO: jobs backfill: added {added} existing outputs to jobs.db", flush=True)
+        else:
+            print("INFO: jobs backfill: nothing new to add", flush=True)
+    except Exception as e:
+        print(f"WARNING: jobs backfill failed: {e}", flush=True)
+
+
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
     """Pre-warm heavy models on startup so the first request isn't slow."""
     from services.rembg_service import rembg_service
     from services.stats_service import stats_service
     from services.face_service import face_service
+    from services.jobs_service import jobs_service
+    import asyncio
+
+    jobs_service.init()
     rembg_service.warm_up()
     face_service.warm_up()
     from services.wtm_config import load_all_configs
@@ -28,6 +100,8 @@ async def lifespan(app: FastAPI):
     Path(settings.WTM_TEMPLATES_DIR).mkdir(parents=True, exist_ok=True)
     Path(settings.WTM_CACHE_DIR).mkdir(parents=True, exist_ok=True)
     load_all_configs()
+
+    asyncio.create_task(_backfill_jobs())
     yield
     stats_service.flush()
 

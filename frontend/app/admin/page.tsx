@@ -31,7 +31,8 @@ interface TemplateConfig {
   stickerFilter: 'none' | 'bw' | 'sketch';
   pngUrl: string;
   fg_path?: string;
-  anchorMode: 'face_center' | 'eyes' | 'none';
+  anchorMode: 'face_center' | 'eyes' | 'none' | 'full_frame' | 'baseline';
+  baseline?: { x1: number; x2: number; y: number } | null;
   dimensions: { width: number; height: number };
   slots: Array<{
     id: string;

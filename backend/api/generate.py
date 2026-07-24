@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 from PIL import Image
 from io import BytesIO
+from collections import OrderedDict
 import os
 import uuid
 import json
@@ -21,6 +22,7 @@ from services.compose import compose_service, load_template_metadata, TemplateMe
 from services.face_service import face_service
 from services.storage_service import storage_service
 from services.stats_service import stats_service
+from services.jobs_service import jobs_service
 
 router = APIRouter()
 
@@ -31,6 +33,26 @@ OUTPUTS_DIR = os.path.join(PROJECT_ROOT, settings.OUTPUTS_DIR)
 
 # Ensure outputs directory exists
 os.makedirs(OUTPUTS_DIR, exist_ok=True)
+
+
+# ── Cutout cache ──────────────────────────────────────────────────────────────
+# In-memory cache of extracted subject cutouts (post-rembg, post-crop) keyed by
+# the generation's output_id. Lets the post-result "Adjust Sticker Placement"
+# flow reuse the exact cutout the user already saw instead of re-running
+# background removal. Single-worker uvicorn (see Dockerfile) → one process, one
+# event loop → no locking needed, same assumption as jobs/archive services.
+# Bounded + LRU-evicted; purely ephemeral — on a cache miss (restart, eviction,
+# or a mode that never populated it) the adjust flow falls back to /api/extract.
+_CUTOUT_CACHE_MAX = 12
+_cutout_cache: "OrderedDict[str, Image.Image]" = OrderedDict()
+
+
+def _cache_cutout(output_id: str, cutout: Image.Image) -> None:
+    """Store a cutout under output_id, evicting the oldest beyond the cap."""
+    _cutout_cache[output_id] = cutout
+    _cutout_cache.move_to_end(output_id)
+    while len(_cutout_cache) > _CUTOUT_CACHE_MAX:
+        _cutout_cache.popitem(last=False)
 
 
 class SlotAssignment(BaseModel):
@@ -60,6 +82,8 @@ async def generate_composite(
     magazine_designation: str = Form(""),    # Magazine mode: person's designation
     overlay_name: str = Form(""),            # Sticker/luggage card: person's name
     overlay_designation: str = Form(""),     # Sticker/luggage card: person's designation
+    guest_name: str = Form(""),              # Capture form: guest's name (optional)
+    guest_phone: str = Form(""),             # Capture form: guest's phone (optional)
 ):
     """
     Generate a composited photo from uploaded image(s) and a template.
@@ -164,7 +188,15 @@ async def generate_composite(
                 "image": sticker_image,
                 "landmarks": landmarks
             })
-        
+
+        # Preserve the extracted cutout so the post-result "Adjust Placement" flow
+        # can reuse it without re-running rembg. Copy now (before compose) so any
+        # downstream scaling/mutation in compose_final can't alter what we cache.
+        # Cached under the output_id once we have it (after save, below).
+        cutout_to_cache = None
+        if processing_mode in ("sticker", "pre_extracted") and len(processed_stickers) == 1:
+            cutout_to_cache = processed_stickers[0]["image"].copy()
+
         # Parse slot assignments if provided
         parsed_assignments = None
         if slot_assignments:
@@ -219,13 +251,29 @@ async def generate_composite(
         
         # Fire off S3 upload in background — user doesn't wait for it
         asyncio.create_task(upload_fn())
-        
+
+        # Cache the cutout for the "Adjust Sticker Placement" reuse path.
+        if cutout_to_cache is not None:
+            _cache_cutout(result.output_id, cutout_to_cache)
+
         # Track stats
         stats_service.increment_generation(processing_mode, template_id)
 
+        # Record in jobs DB (non-blocking; failure must not affect the response)
+        try:
+            jobs_service.upsert(
+                result.output_id,
+                guest_name=guest_name,
+                guest_phone=guest_phone,
+                template_id=template_id,
+                mode=processing_mode,
+            )
+        except Exception as je:
+            print(f"WARNING: jobs_service.upsert failed: {je}", flush=True)
+
         print(f"PERF:   TOTAL:     {time.perf_counter() - t_total:.2f}s (upload runs in background)", flush=True)
         print(f"{'='*50}\n", flush=True)
-        
+
         return GenerateResponse(
             success=True,
             output_id=result.output_id,
@@ -273,16 +321,47 @@ async def extract_sticker(
         
         print(f"PERF [extract]: TOTAL: {time.perf_counter() - t_extract:.2f}s", flush=True)
         return Response(content=buf.getvalue(), media_type="image/png")
-        
+
     except Exception as e:
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/cutout/{output_id}")
+async def get_cutout(output_id: str):
+    """
+    Return the cached subject cutout (transparent PNG) from a prior generation.
+
+    Powers "Adjust Sticker Placement": the editor reuses the exact cutout the
+    user already saw instead of re-running background removal. Returns 404 when
+    the cutout is no longer cached — callers must fall back to /api/extract.
+    """
+    cutout = _cutout_cache.get(output_id)
+    if cutout is None:
+        raise HTTPException(status_code=404, detail="Cutout not cached")
+
+    _cutout_cache.move_to_end(output_id)  # mark as recently used
+    buf = BytesIO()
+    cutout.save(buf, format="PNG")
+    buf.seek(0)
+    return Response(content=buf.getvalue(), media_type="image/png")
+
+
 @router.get("/download/{output_id}")
-async def download_output(output_id: str):
-    """Download a generated output image. Serves from local disk (instant) or S3 fallback."""
+async def download_output(output_id: str, source: Optional[str] = None):
+    """
+    Download a generated output image.
+    ?source=app marks the photo as downloaded (operator-confirmed handoff).
+    QR / customer downloads omit source so downloaded_at is NOT set.
+    """
+    # Mark as downloaded only on explicit operator-initiated downloads
+    if source == "app":
+        try:
+            jobs_service.mark_downloaded(output_id)
+        except Exception as e:
+            print(f"WARNING: mark_downloaded failed for {output_id}: {e}", flush=True)
+
     # Local storage first: instant serve via FileResponse
     local_path = storage_service.get_local_path(output_id)
     if local_path:
@@ -295,12 +374,12 @@ async def download_output(output_id: str):
             filename=f"photobooth-{output_id}.{ext}",
             headers={"Cache-Control": "public, max-age=31536000, immutable"},
         )
-    
+
     # Fallback: fetch from S3 (for older images not in local cache)
     image_bytes = await storage_service.get_output(output_id)
     if image_bytes is None:
         raise HTTPException(status_code=404, detail="Output not found")
-    
+
     return Response(
         content=image_bytes,
         media_type="image/jpeg",

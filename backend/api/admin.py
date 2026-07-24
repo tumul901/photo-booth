@@ -1,16 +1,17 @@
-from fastapi import APIRouter, File, UploadFile, HTTPException, Form, Query, Body
-from fastapi.responses import JSONResponse, FileResponse
-import base64
+from fastapi import APIRouter, File, UploadFile, HTTPException, Form, Query
+from fastapi.responses import FileResponse, StreamingResponse
 import shutil
 import os
 import json
-import time
+import io
+import zipfile
+from datetime import datetime, timezone
 from typing import List, Optional
 from services.stats_service import stats_service
 from services.storage_service import storage_service
 from services.archive_service import archive_service
+from services.jobs_service import jobs_service
 from config import settings
-from pathlib import Path
 from pydantic import BaseModel
 import services.compose as compose_service
 
@@ -247,6 +248,15 @@ class TextConfig(BaseModel):
     align: str = "left"        # "left" | "center" | "right"
     uppercase: bool = False
     rotation: float = 0.0      # Degrees CCW; (x,y) is the rotation pivot
+    # --- Extended styling ---
+    letterSpacing: float = 0.0   # Inter-character spacing, native px (can be negative)
+    strokeWidth: int = 0         # Text outline width, native px (0 = no outline)
+    strokeColor: str = "#000000" # Outline colour
+    shadowBlur: int = 0          # Drop-shadow blur radius, native px (0 = no shadow)
+    shadowColor: str = "#000000" # Drop-shadow colour
+    shadowOffsetX: int = 0       # Drop-shadow horizontal offset, native px
+    shadowOffsetY: int = 0       # Drop-shadow vertical offset, native px
+    opacity: int = 100           # 0-100 text opacity
 
 class TemplateConfigUpdate(BaseModel):
     templateId: str
@@ -267,6 +277,9 @@ class TemplateConfigUpdate(BaseModel):
     name_text: Optional[TextConfig] = None
     designation_text: Optional[TextConfig] = None
     fg_offset: Optional[dict] = None
+    # Baseline placement: {"x1", "x2", "y"} in template-native pixels. The segment
+    # encodes subject bottom (y), horizontal center (midpoint), and target width.
+    baseline: Optional[dict] = None
     # Luggage card printing mode
     luggage_card_mode: bool = False
     print_dpi: int = 300
@@ -356,6 +369,8 @@ async def update_template_config(template_id: str, config: TemplateConfigUpdate)
             "name_text": config.name_text.model_dump() if config.name_text else {},
             "designation_text": config.designation_text.model_dump() if config.designation_text else {},
             "fg_offset": config.fg_offset if config.fg_offset is not None else existing_meta.get("fg_offset", {"x": 0, "y": 0}),
+            # Baseline placement segment (preserve existing if frontend omitted it)
+            "baseline": config.baseline if config.baseline is not None else existing_meta.get("baseline"),
             # Luggage card printing mode
             "luggage_card_mode": config.luggage_card_mode,
             "print_dpi": config.print_dpi,
@@ -377,6 +392,32 @@ async def update_template_config(template_id: str, config: TemplateConfigUpdate)
         raise HTTPException(status_code=500, detail=f"Save failed: {str(e)}")
 
 
+from functools import lru_cache as _lru_cache
+
+
+@_lru_cache(maxsize=64)
+def _png_transparent_pct(path: str, mtime: float) -> float:
+    """
+    Fraction (0-100) of a template PNG that is fully transparent — i.e. how big a
+    'photo window' it has. Cached by (path, mtime). ~0 means a solid card with no
+    window, which only works as a BACKGROUND, never as an OVERLAY.
+    """
+    try:
+        from PIL import Image as _Img
+        _Img.MAX_IMAGE_PIXELS = None
+        im = _Img.open(path)
+        if im.mode != "RGBA":
+            return 0.0
+        # Downsample for speed — the transparent fraction is stable under scaling.
+        im.thumbnail((256, 256))
+        alpha = im.getchannel("A")
+        hist = alpha.histogram()
+        total = sum(hist) or 1
+        return 100.0 * hist[0] / total
+    except Exception:
+        return -1.0  # unknown
+
+
 @router.get("/templates/{template_id}/config")
 async def get_template_config(template_id: str):
     """Get full template configuration for the editor."""
@@ -388,193 +429,223 @@ async def get_template_config(template_id: str):
                 meta = json.load(f)
                 t_id = meta.get("id") or meta.get("templateId")
                 if t_id == template_id:
+                    # Annotate how much transparent 'photo window' the PNG has, so the
+                    # editor can warn when an opaque template is set to overlay mode.
+                    png_file = meta.get("png_path") or meta.get("pngUrl", "")
+                    if png_file.startswith("templates/") or png_file.startswith("templates\\"):
+                        png_file = os.path.basename(png_file)
+                    img_path = os.path.join(TEMPLATES_DIR, png_file)
+                    if os.path.exists(img_path):
+                        meta["_pngTransparentPct"] = _png_transparent_pct(img_path, os.path.getmtime(img_path))
                     return meta
         except:
             continue
-    
+
     raise HTTPException(status_code=404, detail="Template not found")
 
 
 # --- Gallery ---
 
-# In-memory sort cache: holds all items sorted by last_modified desc.
-# Rebuilt on first request and on explicit invalidation; expires after TTL.
-_gallery_cache: list | None = None
-_gallery_cache_time: float = 0.0
-_GALLERY_CACHE_TTL = 30.0  # seconds
-
-
-def _invalidate_gallery_cache() -> None:
-    global _gallery_cache, _gallery_cache_time
-    _gallery_cache = None
-    _gallery_cache_time = 0.0
-
-
-def _fetch_all_items() -> list:
-    """Fetch every item from S3 (or local), sort by last_modified desc, cache."""
-    global _gallery_cache, _gallery_cache_time
-    now = time.time()
-    if _gallery_cache is not None and (now - _gallery_cache_time) < _GALLERY_CACHE_TTL:
-        return _gallery_cache
-
-    provider = storage_service.provider
-    items = []
-
-    if not hasattr(provider, 's3'):
-        # Local storage fallback
-        outputs_dir = getattr(provider, 'output_dir', 'outputs')
-        if os.path.isdir(outputs_dir):
-            for fname in os.listdir(outputs_dir):
-                fpath = os.path.join(outputs_dir, fname)
-                if not os.path.isfile(fpath):
-                    continue
-                output_id = os.path.splitext(fname)[0]
-                stat = os.stat(fpath)
-                items.append({
-                    "output_id": output_id,
-                    "filename": fname,
-                    "url": f"{provider.base_url}/api/download/{output_id}",
-                    "size": stat.st_size,
-                    "last_modified": stat.st_mtime,
-                    "last_modified_iso": None,
-                    "template_prefix": output_id.rsplit('-', 1)[0] if '-' in output_id else output_id,
-                })
-    else:
-        try:
-            paginator = provider.s3.get_paginator('list_objects_v2')
-            for page in paginator.paginate(Bucket=provider.bucket, Prefix=provider.prefix):
-                for obj in page.get('Contents', []):
-                    key = obj['Key']
-                    filename = key.replace(provider.prefix, '', 1)
-                    output_id = os.path.splitext(filename)[0]
-                    lm = obj['LastModified']
-                    url = (
-                        f"{provider.cdn_url}/{key}"
-                        if getattr(provider, 'cdn_url', None)
-                        else f"{provider.base_url}/api/download/{output_id}"
-                    )
-                    items.append({
-                        "output_id": output_id,
-                        "filename": filename,
-                        "url": url,
-                        "size": obj['Size'],
-                        "last_modified": lm.timestamp(),
-                        "last_modified_iso": lm.isoformat(),
-                        "template_prefix": output_id.rsplit('-', 1)[0] if '-' in output_id else output_id,
-                    })
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to list gallery: {str(e)}")
-
-    items.sort(key=lambda x: x["last_modified"], reverse=True)
-    _gallery_cache = items
-    _gallery_cache_time = now
-    return items
-
-
-def _make_cursor(offset: int) -> str:
-    return base64.urlsafe_b64encode(json.dumps({"offset": offset}).encode()).decode()
-
-
-def _parse_cursor(cursor: str) -> int:
-    try:
-        return json.loads(base64.urlsafe_b64decode(cursor))["offset"]
-    except Exception:
-        return 0
-
-
-@router.get("/gallery/templates")
-async def list_gallery_templates():
-    """Return distinct template prefixes from the current cached listing."""
-    all_items = _fetch_all_items()
-    prefixes = sorted({item["template_prefix"] for item in all_items})
-    return {"templates": prefixes}
-
-
-@router.get("/gallery")
-async def list_gallery(
-    limit: int = Query(50, ge=1, le=200),
-    cursor: Optional[str] = Query(None),
-    view: str = Query("active", pattern="^(active|archived|all)$"),
-    template: Optional[str] = Query(None),
-):
-    """
-    List gallery items — sorted by date desc, paginated, filterable.
-    view: active (default) | archived | all
-    template: filter by template_prefix
-    cursor: opaque pagination token from previous response
-    """
-    all_items = _fetch_all_items()
-    archived_ids = set(archive_service.list_archived())
-
-    # Apply view filter
-    if view == "active":
-        filtered = [i for i in all_items if i["output_id"] not in archived_ids]
-    elif view == "archived":
-        filtered = [i for i in all_items if i["output_id"] in archived_ids]
-    else:
-        filtered = all_items
-
-    # Apply template filter
-    if template:
-        filtered = [i for i in filtered if i["template_prefix"] == template]
-
-    total_active = sum(1 for i in all_items if i["output_id"] not in archived_ids)
-    total_archived = len(archived_ids)
-
-    offset = _parse_cursor(cursor) if cursor else 0
-    page = filtered[offset: offset + limit]
-    next_offset = offset + limit
-    has_more = next_offset < len(filtered)
-
-    items_out = []
-    for item in page:
-        items_out.append({
-            "output_id": item["output_id"],
-            "filename": item["filename"],
-            "url": item["url"],
-            "size": item["size"],
-            "last_modified": item["last_modified_iso"] or item["last_modified"],
-            "template_prefix": item["template_prefix"],
-            "archived": item["output_id"] in archived_ids,
-        })
-
+def _job_to_card(job: dict, base_url: str) -> dict:
+    """Convert a jobs DB row to the card shape the frontend expects."""
+    output_id = job["output_id"]
+    created_ts = job["created_at"]
+    created_iso = datetime.fromtimestamp(created_ts, tz=timezone.utc).isoformat()
+    downloaded_ts = job.get("downloaded_at")
+    downloaded_iso = (
+        datetime.fromtimestamp(downloaded_ts, tz=timezone.utc).isoformat()
+        if downloaded_ts else None
+    )
     return {
-        "items": items_out,
-        "next_cursor": _make_cursor(next_offset) if has_more else None,
-        "has_more": has_more,
-        "total_active": total_active,
-        "total_archived": total_archived,
+        "output_id": output_id,
+        "filename": f"{output_id}.jpg",
+        "url": f"{base_url}/api/download/{output_id}",
+        # Operator downloads include ?source=app so downloaded_at is set
+        "download_url": f"{base_url}/api/download/{output_id}?source=app",
+        "size": job.get("file_size", 0),
+        "created_at": created_iso,
+        "last_modified": created_iso,  # kept for backwards-compat with old frontend field
+        "template_prefix": job.get("template_prefix", ""),
+        "mode": job.get("mode", ""),
+        "guest_name": job.get("guest_name", ""),
+        "guest_phone": job.get("guest_phone", ""),
+        "archived": bool(job.get("archived", 0)),
+        "downloaded_at": downloaded_iso,
     }
 
 
+# ── Section list ──────────────────────────────────────────────────────────────
+
+@router.get("/gallery/sections")
+async def gallery_sections(
+    status: str = Query("active", pattern="^(active|downloaded|archived)$"),
+):
+    """
+    Cheap GROUP-BY call: returns tab counts + ordered date sections.
+    The frontend uses this to build the collapsible section headers
+    without loading any photo data yet.
+    """
+    data = jobs_service.get_sections(status)
+    return data
+
+
+# ── Per-section paginated photo list ─────────────────────────────────────────
+
+@router.get("/gallery")
+async def list_gallery(
+    status: str = Query("active", pattern="^(active|downloaded|archived)$"),
+    date: str = Query(...),           # 'today' | 'yesterday' | 'DD/MM/YYYY'
+    limit: int = Query(75, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    """
+    Paginated photo list for one date section.
+    Called lazily when the operator expands a section.
+    """
+    base_url = settings.BASE_URL
+    rows = jobs_service.get_jobs_for_section(date, status=status, limit=limit, offset=offset)
+    items = [_job_to_card(r, base_url) for r in rows]
+    return {"items": items, "offset": offset, "limit": limit, "count": len(items)}
+
+
+# ── Search ────────────────────────────────────────────────────────────────────
+
+@router.get("/gallery/search")
+async def search_gallery(
+    q: str = Query(..., min_length=1),
+    status: str = Query("active", pattern="^(active|downloaded|archived)$"),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Cross-section name / output_id search. Returns flat results with section annotation."""
+    base_url = settings.BASE_URL
+    rows = jobs_service.search(q, status=status, limit=limit)
+    items = [_job_to_card(r, base_url) for r in rows]
+    return {"items": items, "query": q}
+
+
+# ── Template prefix list ──────────────────────────────────────────────────────
+
+@router.get("/gallery/templates")
+async def list_gallery_templates(
+    status: str = Query("active", pattern="^(active|downloaded|archived)$"),
+):
+    """Return distinct template prefixes for the filter dropdown."""
+    prefixes = jobs_service.get_template_prefixes(status)
+    return {"templates": prefixes}
+
+
+# ── Mark / unmark downloaded ──────────────────────────────────────────────────
+
 class BulkIdsBody(BaseModel):
     ids: List[str]
+
+
+class ZipBody(BaseModel):
+    # Either pass explicit ids OR (date + status) to let the server resolve all IDs
+    ids: Optional[List[str]] = None
+    date: Optional[str] = None   # 'today' | 'yesterday' | 'DD/MM/YYYY'
+    status: str = "active"       # 'active' | 'downloaded' | 'archived' | 'all'
 
 
 class ConfirmBody(BaseModel):
     confirm: str
 
 
+@router.patch("/gallery/{output_id}/mark-downloaded")
+async def mark_downloaded(output_id: str):
+    jobs_service.mark_downloaded(output_id)
+    return {"success": True}
+
+
+@router.patch("/gallery/{output_id}/unmark-downloaded")
+async def unmark_downloaded(output_id: str):
+    jobs_service.unmark_downloaded(output_id)
+    return {"success": True}
+
+
+@router.patch("/gallery/bulk/mark-downloaded")
+async def bulk_mark_downloaded(body: BulkIdsBody):
+    count = jobs_service.bulk_mark_downloaded(body.ids)
+    return {"success": True, "updated": count}
+
+
+@router.patch("/gallery/bulk/unmark-downloaded")
+async def bulk_unmark_downloaded(body: BulkIdsBody):
+    count = jobs_service.bulk_unmark_downloaded(body.ids)
+    return {"success": True, "updated": count}
+
+
+# ── Archive / unarchive ───────────────────────────────────────────────────────
+
 @router.post("/gallery/archive")
 async def archive_images(body: BulkIdsBody):
-    """Soft-hide a list of output_ids from the active gallery view."""
-    added = archive_service.add_many(body.ids)
-    _invalidate_gallery_cache()
-    return {"success": True, "archived": added}
+    """Soft-hide photos from the active/downloaded views."""
+    count = jobs_service.bulk_set_archived(body.ids, True)
+    # Keep archive_service in sync for any legacy callers
+    archive_service.add_many(body.ids)
+    return {"success": True, "archived": count}
 
 
 @router.post("/gallery/unarchive")
 async def unarchive_images(body: BulkIdsBody):
-    """Restore a list of output_ids to the active gallery view."""
-    removed = archive_service.remove_many(body.ids)
-    _invalidate_gallery_cache()
-    return {"success": True, "unarchived": removed}
+    count = jobs_service.bulk_set_archived(body.ids, False)
+    archive_service.remove_many(body.ids)
+    return {"success": True, "unarchived": count}
 
+
+# ── ZIP download ──────────────────────────────────────────────────────────────
+
+@router.post("/gallery/zip")
+async def download_zip(body: ZipBody):
+    """
+    Stream a ZIP of output images.
+    Pass explicit `ids` list OR `date + status` to zip an entire date section
+    (the server resolves all output_ids from the DB so pagination is not a problem).
+    The download also marks all included photos as downloaded.
+    """
+    if body.date:
+        # Server resolves every output_id for this date section — no page cap
+        rows = jobs_service.get_jobs_for_section(body.date, status=body.status, limit=10_000, offset=0)
+        ids = [r["output_id"] for r in rows]
+        filename = f"photobooth-{body.date}.zip"
+    elif body.ids:
+        ids = body.ids
+        filename = "photobooth-photos.zip"
+    else:
+        raise HTTPException(status_code=400, detail="Provide either `ids` or `date`")
+
+    if not ids:
+        raise HTTPException(status_code=404, detail="No photos found for this request")
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
+        for output_id in ids:
+            local_path = storage_service.get_local_path(output_id)
+            if local_path and os.path.exists(local_path):
+                ext = os.path.splitext(local_path)[1]
+                with open(local_path, "rb") as f:
+                    zf.writestr(f"photobooth-{output_id}{ext}", f.read())
+            else:
+                image_bytes = await storage_service.get_output(output_id)
+                if image_bytes:
+                    zf.writestr(f"photobooth-{output_id}.jpg", image_bytes)
+
+    jobs_service.bulk_mark_downloaded(ids)
+
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+# ── Bulk delete ───────────────────────────────────────────────────────────────
 
 @router.delete("/gallery/bulk")
 async def bulk_delete_images(body: BulkIdsBody):
-    """Delete a list of output_ids from storage (S3 + local) and archived list."""
-    results = {"deleted": [], "not_found": [], "errors": []}
+    """Delete a list of output_ids from storage (S3 + local) and the jobs DB."""
+    results: dict = {"deleted": [], "not_found": [], "errors": []}
     for output_id in body.ids:
         try:
             deleted = await storage_service.delete_output(output_id)
@@ -584,35 +655,31 @@ async def bulk_delete_images(body: BulkIdsBody):
                 results["not_found"].append(output_id)
         except Exception as e:
             results["errors"].append({"id": output_id, "error": str(e)})
-    # Remove deleted ids from archive list too
     all_removed = results["deleted"] + results["not_found"]
     if all_removed:
+        jobs_service.bulk_delete(all_removed)
         archive_service.remove_many(all_removed)
-    _invalidate_gallery_cache()
     return {"success": True, **results}
 
 
 @router.delete("/gallery/all")
 async def delete_all_images(body: ConfirmBody):
-    """
-    Delete every output image from storage.
-    Requires body: {"confirm": "delete"} as a safety guard.
-    """
+    """Delete every output image. Requires body: {"confirm": "delete"}."""
     if body.confirm != "delete":
         raise HTTPException(status_code=400, detail='Body must contain {"confirm": "delete"}')
 
-    all_items = _fetch_all_items()
-    results = {"deleted": 0, "errors": []}
-    for item in all_items:
+    all_ids = list(jobs_service.get_all_ids())
+
+    results: dict = {"deleted": 0, "errors": []}
+    for output_id in all_ids:
         try:
-            await storage_service.delete_output(item["output_id"])
+            await storage_service.delete_output(output_id)
             results["deleted"] += 1
         except Exception as e:
-            results["errors"].append({"id": item["output_id"], "error": str(e)})
+            results["errors"].append({"id": output_id, "error": str(e)})
 
-    # Clear the entire archive list as well
-    archive_service.remove_many([i["output_id"] for i in all_items])
-    _invalidate_gallery_cache()
+    jobs_service.bulk_delete(all_ids)
+    archive_service.remove_many(all_ids)
     return {"success": True, **results}
 
 
@@ -687,6 +754,70 @@ async def list_fonts():
     return {"fonts": fonts}
 
 
+@router.post("/fonts")
+async def upload_font(file: UploadFile = File(...)):
+    """
+    Upload a custom .ttf or .otf font. Stored in backend/fonts/ and immediately
+    available to the template editor (preview) and the compositor (final render).
+    Returns the font stem name to select in the UI.
+    """
+    fonts_dir = os.path.join(PROJECT_ROOT, "backend", "fonts")
+    os.makedirs(fonts_dir, exist_ok=True)
+
+    orig = os.path.basename(file.filename or "")
+    ext = os.path.splitext(orig)[1].lower()
+    if ext not in (".ttf", ".otf"):
+        raise HTTPException(status_code=400, detail="Only .ttf or .otf font files are allowed")
+
+    # Sanitise the filename to a safe stem (keep alnum, dot, dash, underscore)
+    stem = os.path.splitext(orig)[0]
+    safe_stem = "".join(c if (c.isalnum() or c in "._-") else "_" for c in stem).strip("._") or "font"
+    safe_name = f"{safe_stem}{ext}"
+    dest = os.path.join(fonts_dir, safe_name)
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    # Validate it's a real, loadable font before saving (rejects corrupt/misnamed files)
+    try:
+        from PIL import ImageFont
+        from io import BytesIO
+        ImageFont.truetype(BytesIO(data), 24)
+    except Exception:
+        raise HTTPException(status_code=400, detail="File is not a valid TrueType/OpenType font")
+
+    with open(dest, "wb") as f:
+        f.write(data)
+
+    print(f"INFO: uploaded font '{safe_name}' ({len(data) / 1024:.0f}KB)", flush=True)
+    return {"success": True, "name": safe_stem, "filename": safe_name}
+
+
+@router.get("/fonts/{font_name}/file")
+async def get_font_file(font_name: str):
+    """
+    Serve a font's raw bytes so the template editor can render text previews in
+    the exact typeface the backend composites with (true WYSIWYG placement).
+    Matched case-insensitively on the font stem (e.g. "Roboto-Bold").
+    """
+    fonts_dir = os.path.join(PROJECT_ROOT, "backend", "fonts")
+    if os.path.isdir(fonts_dir):
+        target = font_name.lower()
+        for fname in os.listdir(fonts_dir):
+            if not fname.lower().endswith((".ttf", ".otf")):
+                continue
+            if os.path.splitext(fname)[0].lower() == target:
+                path = os.path.join(fonts_dir, fname)
+                media = "font/otf" if fname.lower().endswith(".otf") else "font/ttf"
+                return FileResponse(
+                    path,
+                    media_type=media,
+                    headers={"Cache-Control": "public, max-age=86400"},
+                )
+    raise HTTPException(status_code=404, detail="Font not found")
+
+
 @router.delete("/gallery/{output_id}")
 async def delete_gallery_image(output_id: str):
     """Delete a single output image from storage (S3 or local)."""
@@ -694,8 +825,8 @@ async def delete_gallery_image(output_id: str):
         deleted = await storage_service.delete_output(output_id)
         if not deleted:
             raise HTTPException(status_code=404, detail="Image not found")
+        jobs_service.delete(output_id)
         archive_service.remove(output_id)
-        _invalidate_gallery_cache()
         return {"success": True, "deleted": output_id}
     except HTTPException:
         raise

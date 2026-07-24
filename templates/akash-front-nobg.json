@@ -1,0 +1,58 @@
+{
+  "templateId": "akash-front-nobg",
+  "name": "akash-front-nobg",
+  "templateType": "sticker",
+  "compositeMode": "background",
+  "pngUrl": "akash-front-nobg.png",
+  "png_path": "akash-front-nobg.png",
+  "fg_path": "",
+  "anchorMode": "baseline",
+  "stickerFilter": "none",
+  "showVisualGuide": false,
+  "allowManualPositioning": false,
+  "dimensions": {
+    "width": 638,
+    "height": 1016
+  },
+  "slots": [],
+  "metadata": {
+    "category": "custom",
+    "tags": [],
+    "author": "Admin"
+  },
+  "name_text": {
+    "x": 319,
+    "y": 796,
+    "fontSize": 60,
+    "color": "#FFFFFF",
+    "fontPath": "",
+    "fontName": "",
+    "maxWidth": 0,
+    "align": "center",
+    "uppercase": false,
+    "rotation": 0.0,
+    "letterSpacing": 0.0,
+    "strokeWidth": 0,
+    "strokeColor": "#000000",
+    "shadowBlur": 0,
+    "shadowColor": "#000000",
+    "shadowOffsetX": 0,
+    "shadowOffsetY": 0,
+    "opacity": 100
+  },
+  "designation_text": {},
+  "fg_offset": {
+    "x": 0,
+    "y": 0
+  },
+  "baseline": {
+    "x1": 105,
+    "x2": 549,
+    "y": 719
+  },
+  "luggage_card_mode": true,
+  "print_dpi": 300,
+  "print_width_mm": 54.0,
+  "print_height_mm": 86.0,
+  "output_format": "png"
+}

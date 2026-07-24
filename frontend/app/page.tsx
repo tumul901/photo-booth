@@ -19,6 +19,7 @@ import PreviewEditScreen from '../components/screens/PreviewEditScreen';
 import ResultScreen from '../components/screens/ResultScreen';
 import WordSelectionStep from '../components/WordSelectionStep';
 import MagazineNameScreen from '../components/screens/MagazineNameScreen';
+import CaptureFormScreen from '../components/screens/CaptureFormScreen';
 import styles from './page.module.css';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -111,8 +112,12 @@ export default function BoothPage() {
   const [overlayDesignation, setOverlayDesignation] = useSessionState<string>('overlayDesignation', '');
   const [wtmName, setWtmName] = useSessionState<string>('wtmName', '');
   const [wtmDesignation, setWtmDesignation] = useSessionState<string>('wtmDesignation', '');
+  // Capture form — persisted so a refresh mid-session doesn't re-ask
+  const [guestName, setGuestName] = useSessionState<string>('guestName', '');
+  const [guestPhone, setGuestPhone] = useSessionState<string>('guestPhone', '');
 
   // Transient state (not persisted — doesn't survive refresh by design)
+  const [captureFormEnabled, setCaptureFormEnabled] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [rawImage, setRawImage] = useState<string | null>(null);
   const [templateConfig, setTemplateConfig] = useState<any>(null);
@@ -128,6 +133,14 @@ export default function BoothPage() {
   const isMagazineTemplate = selectedTemplateMode === 'magazine';
   // True when a sticker/luggage card template has name or designation overlay configured
   const isOverlayTemplate = !isMagazineTemplate && (templateHasNameText || templateHasDesignationText);
+
+  // Fetch capture_form flag on mount so the booth knows whether to show the form.
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/api/feature-flags`)
+      .then(r => r.ok ? r.json() : null)
+      .then(flags => { if (flags) setCaptureFormEnabled(!!flags.capture_form); })
+      .catch(() => {});
+  }, []);
 
   // Fetch template config when a template is selected to detect overlay flags.
   // WTM templates live in the WTM config system, not /api/admin/templates — skip them.
@@ -308,6 +321,10 @@ export default function BoothPage() {
         formData.append('overlay_designation', overlayDesignation);
       }
 
+      // Capture form: always send guest identity if collected (empty string is fine)
+      formData.append('guest_name', guestName);
+      formData.append('guest_phone', guestPhone);
+
       // Send to backend
       console.time('API Generate Request');
       const endpoint = isWTM ? `${API_BASE_URL}/api/wtm/generate` : `${API_BASE_URL}/api/generate`;
@@ -395,17 +412,35 @@ export default function BoothPage() {
     setRawImage(imageData);
 
     // Fetch config for the placement editor; default to {} so the button always appears
+    let config: any = {};
     try {
       const res = await fetch(`${API_BASE_URL}/api/admin/templates/${selectedTemplate}/config`);
-      const config = res.ok ? await res.json() : {};
-      setTemplateConfig(config);
+      config = res.ok ? await res.json() : {};
     } catch {
-      setTemplateConfig({});
+      config = {};
     }
 
-    // Auto-generate immediately; user can adjust placement from result screen
+    // Map the template's first slot into photoSlot so the editor can auto-fit the
+    // cutout, draw the slot outline, and offer "Reset Position" (mirrors WTM).
+    const slot = Array.isArray(config.slots) ? config.slots[0] : null;
+    config.photoSlot = slot
+      ? { x: slot.x, y: slot.y, width: slot.width, height: slot.height }
+      : null;
+    setTemplateConfig(config);
+
+    // If Interactive Repositioning is enabled, show the placement editor first
+    // (capture → BG removal → adjust → result). The editor handles extraction.
+    // Magazine uses a different FG-overlay composite and is excluded (same as the
+    // post-result adjust button below).
+    if (config.allowManualPositioning && !isMagazineTemplate && processingMode !== 'magazine') {
+      setIsEditing(true);
+      return;
+    }
+
+    // Otherwise auto-generate straight to the result, where the
+    // "Adjust Sticker Placement" button remains available as a fallback.
     executeGeneration(imageData, processingMode);
-  }, [selectedTemplate, processingMode, composedTemplatePath, executeGeneration]);
+  }, [selectedTemplate, processingMode, composedTemplatePath, executeGeneration, isMagazineTemplate]);
 
   const handleEditComplete = useCallback((extractedBase64: string, position: any) => {
     setIsEditing(false);
@@ -423,12 +458,24 @@ export default function BoothPage() {
     setStep(4);
   }, [setComposedTemplatePath, setWtmName, setWtmDesignation, setStep]);
 
+  const handleCaptureFormConfirm = useCallback((name: string, phone: string) => {
+    setGuestName(name);
+    setGuestPhone(phone);
+    setStep(1);
+  }, [setGuestName, setGuestPhone, setStep]);
+
   const handleStartOver = useCallback(() => {
     // Keep processingMode so the user lands back on template selection in the same mode
     const currentMode = processingMode;
     clearSession();
     setProcessingMode(currentMode);
-    setStep(2);
+    // If capture form is on, return to it so new guest info is collected each session
+    setStep(captureFormEnabled ? 0 : 2);
+    // Clear the in-flight capture/editor state so the next guest never inherits
+    // the previous guest's photo, cutout, or open editor.
+    setIsEditing(false);
+    setRawImage(null);
+    setTemplateConfig(null);
     setSelectedTemplate('');
     setSelectedTemplateMode('');
     setResult(null);
@@ -440,9 +487,11 @@ export default function BoothPage() {
     setOverlayDesignation('');
     setWtmName('');
     setWtmDesignation('');
+    setGuestName('');
+    setGuestPhone('');
     setError(null);
     setIsProcessing(false);
-  }, [processingMode, setStep, setProcessingMode, setSelectedTemplate, setSelectedTemplateMode, setResult, setSelectedWords, setComposedTemplatePath, setMagazineName, setMagazineDesignation, setOverlayName, setOverlayDesignation, setWtmName, setWtmDesignation]);
+  }, [processingMode, captureFormEnabled, setStep, setProcessingMode, setSelectedTemplate, setSelectedTemplateMode, setResult, setSelectedWords, setComposedTemplatePath, setMagazineName, setMagazineDesignation, setOverlayName, setOverlayDesignation, setWtmName, setWtmDesignation, setGuestName, setGuestPhone]);
 
   const handleError = useCallback((msg: string) => {
     setError(msg);
@@ -466,6 +515,11 @@ export default function BoothPage() {
 
       {/* Step Content */}
       <div className={styles.stepContent}>
+        {/* Step 0 — Capture form (name + phone), only when flag is ON */}
+        {step === 0 && captureFormEnabled && (
+          <CaptureFormScreen onConfirm={handleCaptureFormConfirm} />
+        )}
+
         {/* Step 1 — Mode Select (all modes) */}
         {step === 1 && (
           <ModeSelectScreen onSelectMode={handleModeSelect} />
@@ -546,6 +600,10 @@ export default function BoothPage() {
             }
             skipConfigFetch={processingMode === 'word_template'}
             photoSlot={templateConfig?.photoSlot}
+            // Reuse the cached cutout only when adjusting an existing result; at
+            // captureStep the editor extracts a fresh capture and any lingering
+            // result.outputId would belong to a previous photo.
+            cutoutOutputId={step === resultStep ? result?.outputId : undefined}
           />
         )}
 

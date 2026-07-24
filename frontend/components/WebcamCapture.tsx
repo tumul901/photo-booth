@@ -51,7 +51,10 @@ export default function WebcamCapture({
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('9:16');
-  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+  // Default to the back/rear camera ('environment'). Passed as an "ideal"
+  // constraint (not exact), so single-camera devices fall back to their only
+  // camera instead of erroring. The 🔄 button still flips to the front camera.
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
   
   const [showGuide, setShowGuide] = useState(false);
   const [zoom, setZoom] = useState(1);

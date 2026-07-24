@@ -402,6 +402,24 @@ async def save_text_overlay(template_id: str, req: SaveTextOverlayRequest):
     return {'ok': True}
 
 
+@router.delete('/cache')
+async def clear_wtm_cache():
+    """Delete all disk-cached WTM composition PNGs and flush the in-memory cache."""
+    wtm_cache.clear()
+    cache_dir = wtm_config.WTM_CACHE_DIR
+    deleted = 0
+    freed_bytes = 0
+    for f in cache_dir.glob('*.png'):
+        try:
+            freed_bytes += f.stat().st_size
+            f.unlink()
+            deleted += 1
+        except Exception:
+            pass
+    logger.info("WTM cache cleared: %d files removed (%.1f MB)", deleted, freed_bytes / 1_048_576)
+    return {'ok': True, 'deleted_files': deleted, 'freed_mb': round(freed_bytes / 1_048_576, 2)}
+
+
 @router.put('/templates/{template_id}/bundles')
 async def save_bundles(template_id: str, req: SaveBundlesRequest):
     config = _load_raw_config(template_id)

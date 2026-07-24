@@ -35,6 +35,13 @@ interface PreviewEditScreenProps {
   templateImageUrl?: string;
   skipConfigFetch?: boolean;
   photoSlot?: PhotoSlot | null;
+  /**
+   * output_id of a prior generation whose cutout the backend may still have
+   * cached. When set, the editor reuses that cutout instead of re-running
+   * background removal (the "Adjust Sticker Placement" path). Falls back to a
+   * fresh /api/extract on a cache miss.
+   */
+  cutoutOutputId?: string;
   onComplete: (extractedBase64: string, position: { x: number; y: number; scale: number; editorWidth: number; stickerWidth?: number }) => void;
   onCancel: () => void;
 }
@@ -46,6 +53,7 @@ export default function PreviewEditScreen({
   templateImageUrl,
   skipConfigFetch,
   photoSlot,
+  cutoutOutputId,
   onComplete,
   onCancel,
 }: PreviewEditScreenProps) {
@@ -154,7 +162,6 @@ export default function PreviewEditScreen({
       try {
         setIsExtracting(true);
         setError(null);
-        const blob = await fetch(rawImage).then(r => r.blob());
 
         if (templateConfig?.templateType === 'frame') {
           setExtractedSrc(rawImage);
@@ -162,6 +169,28 @@ export default function PreviewEditScreen({
           return;
         }
 
+        const readBlobIntoSticker = async (blob: Blob) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            if (active) { setExtractedSrc(reader.result as string); setIsExtracting(false); }
+          };
+          reader.readAsDataURL(blob);
+        };
+
+        // Reuse the cutout from a prior generation if the backend still has it —
+        // skips a redundant background-removal pass. On any miss/error we fall
+        // through to a fresh extraction below, so behaviour is never worse.
+        if (cutoutOutputId) {
+          try {
+            const cacheRes = await fetch(`${API_BASE_URL}/api/cutout/${cutoutOutputId}`);
+            if (cacheRes.ok) {
+              await readBlobIntoSticker(await cacheRes.blob());
+              return;
+            }
+          } catch { /* fall back to fresh extraction */ }
+        }
+
+        const blob = await fetch(rawImage).then(r => r.blob());
         const formData = new FormData();
         formData.append('photo', blob, 'photo.jpg');
         formData.append('anchor_mode', anchorMode);
@@ -169,11 +198,7 @@ export default function PreviewEditScreen({
         const apiRes = await fetch(`${API_BASE_URL}/api/extract`, { method: 'POST', body: formData });
         if (!apiRes.ok) throw new Error('Failed to extract subject from background.');
 
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          if (active) { setExtractedSrc(reader.result as string); setIsExtracting(false); }
-        };
-        reader.readAsDataURL(await apiRes.blob());
+        await readBlobIntoSticker(await apiRes.blob());
       } catch (err) {
         if (active) { setError(err instanceof Error ? err.message : 'Extraction error'); setIsExtracting(false); }
       }
@@ -181,7 +206,7 @@ export default function PreviewEditScreen({
 
     extract();
     return () => { active = false; };
-  }, [rawImage, anchorMode, selectedTemplate, templateConfig]);
+  }, [rawImage, anchorMode, selectedTemplate, templateConfig, cutoutOutputId]);
 
   useEffect(() => {
     if (isExtracting) hasAutoFit.current = false;

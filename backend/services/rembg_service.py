@@ -28,16 +28,26 @@ from io import BytesIO
 from PIL import Image, ImageFilter
 from rembg import new_session, remove
 
-from services.feature_flags_service import get_rembg_profile, get_sticker_effect, get_sticker_stroke_color, get_sticker_stroke_width
+from services.feature_flags_service import get_rembg_profile, get_sticker_effect, get_sticker_stroke_color, get_sticker_stroke_width, get_edge_cleanup
 from services.sticker_effects import (
     apply_drop_shadow,
     apply_stroke,
     apply_unsharp,
+    clean_alpha_islands,
+    decontaminate_edges,
 )
 
 # --- Profile definitions ------------------------------------------------------
 
 PROFILES: dict[str, dict] = {
+    "human_hi": {
+        # Human-specialized model: understands the body silhouette, so it doesn't
+        # bleed the foreground into busy backgrounds (office clutter, similar-colored
+        # walls) the way the general models do. Cleaner edges AND faster (~0.5s).
+        "model": "u2net_human_seg",
+        "max_input": 1200,
+        "alpha_feather": 0.8,
+    },
     "isnet_hi": {
         "model": "isnet-general-use",
         "max_input": 1200,
@@ -50,7 +60,7 @@ PROFILES: dict[str, dict] = {
     },
 }
 
-DEFAULT_PROFILE = "isnet_hi"
+DEFAULT_PROFILE = "human_hi"
 
 
 def _resolve_profile(name: str | None) -> tuple[str, dict]:
@@ -202,6 +212,15 @@ class BackgroundRemovalService:
             out = self._feather_alpha(raw_out, profile.get("alpha_feather", 0.0))
         metrics["feather_ms"] = (time.perf_counter() - t0) * 1000
 
+        # 3b) edge cleanup (background-independent): drop segmentation ghosts and
+        # recolor the soft edge ring with the subject's own colour so no old-background
+        # halo survives onto the new template. Cheap (~tens of ms). Default ON.
+        t0 = time.perf_counter()
+        if get_edge_cleanup() and not use_alpha_matting:
+            out = clean_alpha_islands(out, low_alpha_cut=12, min_area_frac=0.02)
+            out = decontaminate_edges(out, grow=4, shrink=1)
+        metrics["cleanup_ms"] = (time.perf_counter() - t0) * 1000
+
         # 4) post-process effect (stroke / shadow / unsharp).
         # alpha_matting is handled above; "none" is a no-op.
         t0 = time.perf_counter()
@@ -254,7 +273,7 @@ class BackgroundRemovalService:
             f"orig={original_size} -> input={m['input_size']} ({m['input_megapixels']:.2f}MP) "
             f"| decode={decode_ms:.0f}ms downsize={m['downsize_ms']:.0f}ms "
             f"inference={m['inference_ms']:.0f}ms feather={m['feather_ms']:.0f}ms "
-            f"effect={m['effect_ms']:.0f}ms "
+            f"cleanup={m.get('cleanup_ms', 0):.0f}ms effect={m['effect_ms']:.0f}ms "
             f"TOTAL={m['total_ms']:.0f}ms",
             flush=True,
         )
