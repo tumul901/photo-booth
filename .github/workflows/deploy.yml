@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
 
+# Never let two pushes deploy at once — a second run waits for the first to
+# finish instead of racing another `docker compose up --build` on the same box.
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
 jobs:
   deploy:
     name: Deploy to InterServer VPS
@@ -16,11 +22,58 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USERNAME }}
           password: ${{ secrets.VPS_PASSWORD }}
+          script_stop: true       # abort on the first failing command
+          command_timeout: 20m    # a cold `--build` can take several minutes
           script: |
+            set -e
             cd ~/photo-booth
-            git pull origin main
+
+            # --- Preserve the live gallery DB across the hard reset ---
+            # jobs.db holds guest names / phones / archive+download flags that
+            # cannot be regenerated from S3. It is now gitignored, but this first
+            # deploy still removes the previously-tracked copy, and reset --hard
+            # discards runtime writes — so snapshot it first and restore it if it
+            # vanishes. (Doubles as a free rolling backup before every deploy.)
+            echo "==> Backing up runtime gallery DB"
+            mkdir -p ~/booth-data-backup
+            cp -f backend/data/jobs.db* ~/booth-data-backup/ 2>/dev/null || true
+
+            echo "==> Force-syncing working tree to origin/main"
+            # reset --hard + clean makes the VPS a byte-for-byte copy of main,
+            # immune to local edits / stray untracked files that abort `git pull`.
+            # outputs/ and .env are gitignored so both commands leave them alone.
+            git fetch origin main
+            git reset --hard origin/main
+            git clean -fd
+
+            echo "==> Restoring gallery DB if the sync removed it"
+            if [ ! -f backend/data/jobs.db ]; then
+              mkdir -p backend/data
+              cp -f ~/booth-data-backup/jobs.db* backend/data/ 2>/dev/null || true
+              echo "Restored jobs.db from backup."
+            fi
+
+            echo "==> Rebuilding and (re)starting containers"
             docker compose up -d --build
-            echo "Waiting for containers to start..."
-            sleep 10
-            docker ps
+
+            echo "==> Pruning dangling images to reclaim disk"
+            docker image prune -f
+
+            echo "==> Waiting for backend to report healthy"
+            for i in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:8001/health >/dev/null 2>&1; then
+                echo "Backend healthy after ${i} attempt(s)."
+                break
+              fi
+              if [ "$i" -eq 30 ]; then
+                echo "ERROR: backend never became healthy — dumping status/logs."
+                docker compose ps
+                docker compose logs --tail=60 backend
+                exit 1
+              fi
+              sleep 2
+            done
+
+            echo "==> Final status"
+            docker compose ps
             echo "Deployment complete!"

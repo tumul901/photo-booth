@@ -39,6 +39,16 @@ npm-debug.log*
 backend/data/stats.json
 backend/data/archived.json
 backend/data/feature_flags.json
+# Gallery index DB — live per-deployment data; never source-controlled.
+# (SQLite WAL mode also produces -wal/-shm sidecars; ignore those too so
+#  `git clean` in the deploy never corrupts an active DB.)
+backend/data/*.db
+backend/data/*.db-wal
+backend/data/*.db-shm
+
+# Stray phone screenshots accidentally committed
+IMG_*.PNG
+IMG_*.png
 
 # Markdown files (noisy docs)
 *.md
