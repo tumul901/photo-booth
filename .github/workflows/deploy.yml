@@ -22,7 +22,6 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USERNAME }}
           password: ${{ secrets.VPS_PASSWORD }}
-          script_stop: true       # abort on the first failing command
           command_timeout: 20m    # a cold `--build` can take several minutes
           script: |
             set -e
