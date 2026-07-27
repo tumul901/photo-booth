@@ -16,19 +16,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # --- TEMPORARY DEBUG: confirm the three secrets actually reach this
-      #     workflow. Prints only presence + length, never the values
-      #     (GitHub also auto-masks secret values in logs). Remove once green.
-      - name: Verify secrets reach this workflow
-        env:
-          HOST: ${{ secrets.VPS_HOST }}
-          USER: ${{ secrets.VPS_USERNAME }}
-          PW: ${{ secrets.VPS_PASSWORD }}
-        run: |
-          echo "VPS_HOST     present=${HOST:+yes} length=${#HOST}"
-          echo "VPS_USERNAME present=${USER:+yes} length=${#USER}"
-          echo "VPS_PASSWORD present=${PW:+yes} length=${#PW}"
-
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
         with:
@@ -71,19 +58,23 @@ jobs:
             echo "==> Pruning dangling images to reclaim disk"
             docker image prune -f
 
-            echo "==> Waiting for backend to report healthy"
-            for i in $(seq 1 30); do
+            echo "==> Waiting for backend to report healthy (up to 5 min)"
+            # Cold starts are slow: the backend rebuilds jobs.db from the S3
+            # bucket and loads the rembg model before it serves /health, which
+            # can take well over a minute. Poll for up to 5 minutes before
+            # declaring failure so a slow-but-fine boot isn't a false failure.
+            for i in $(seq 1 60); do
               if curl -fsS http://127.0.0.1:8001/health >/dev/null 2>&1; then
-                echo "Backend healthy after ${i} attempt(s)."
+                echo "Backend healthy after ~$((i * 5))s."
                 break
               fi
-              if [ "$i" -eq 30 ]; then
+              if [ "$i" -eq 60 ]; then
                 echo "ERROR: backend never became healthy — dumping status/logs."
                 docker compose ps
-                docker compose logs --tail=60 backend
+                docker compose logs --tail=80 backend
                 exit 1
               fi
-              sleep 2
+              sleep 5
             done
 
             echo "==> Final status"
