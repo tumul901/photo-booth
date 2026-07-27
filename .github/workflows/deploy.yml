@@ -16,6 +16,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # --- TEMPORARY DEBUG: confirm the three secrets actually reach this
+      #     workflow. Prints only presence + length, never the values
+      #     (GitHub also auto-masks secret values in logs). Remove once green.
+      - name: Verify secrets reach this workflow
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          USER: ${{ secrets.VPS_USERNAME }}
+          PW: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          echo "VPS_HOST     present=${HOST:+yes} length=${#HOST}"
+          echo "VPS_USERNAME present=${USER:+yes} length=${#USER}"
+          echo "VPS_PASSWORD present=${PW:+yes} length=${#PW}"
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
         with:
