@@ -5,7 +5,16 @@
       "Bash(python:*)",
       "Bash(./venv/Scripts/python.exe -c ' *)",
       "Bash(python -m py_compile services/compose.py api/admin.py)",
-      "Bash(PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe -c ' *)"
+      "Bash(PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe -c ' *)",
+      "Bash(grep -E 'jobs\\\\.db|IMG_7500|outputs/|\\\\.env$|\\\\.otf$')",
+      "Bash(git -C d:/work2/photo-booth status -sb)",
+      "Bash(git -C d:/work2/photo-booth log --oneline -10)",
+      "Bash(git -C d:/work2/photo-booth ls-files backend/data/jobs.db IMG_7500.PNG .github/workflows/deploy.yml .gitignore)",
+      "Bash(git -C d:/work2/photo-booth diff --cached --name-status)",
+      "Bash(git -C d:/work2/photo-booth ls-files backend/data/)",
+      "Bash(git -C d:/work2/photo-booth diff --cached --stat)",
+      "Bash(git -C d:/work2/photo-booth diff --stat)",
+      "Bash(git log *)"
     ]
   }
 }

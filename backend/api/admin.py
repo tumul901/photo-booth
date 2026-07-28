@@ -288,6 +288,79 @@ class TemplateConfigUpdate(BaseModel):
     output_format: str = "png"  # "png" | "jpeg_print"
 
 
+def _config_to_template_json(template_id: str, config: "TemplateConfigUpdate",
+                             png_url: str, fg_path: str, fg_offset: dict, baseline) -> dict:
+    """
+    Serialize an editor config into the on-disk template JSON shape. Shared by the
+    save endpoint and the Test Render preview so the two can never drift apart.
+    """
+    return {
+        "templateId": template_id,
+        "name": config.name,
+        "templateType": config.templateType,
+        "compositeMode": config.compositeMode,
+        "pngUrl": png_url,
+        "png_path": png_url,
+        "fg_path": fg_path,
+        "anchorMode": config.anchorMode,
+        "stickerFilter": config.stickerFilter,
+        "showVisualGuide": config.showVisualGuide,
+        "allowManualPositioning": config.allowManualPositioning,
+        "dimensions": config.dimensions,
+        "slots": [
+            {
+                "slotId": slot.id,
+                "x": slot.x, "y": slot.y, "width": slot.width, "height": slot.height,
+                "anchor": {
+                    "targetX": int(slot.width * slot.anchorX),
+                    "targetY": int(slot.height * slot.anchorY),
+                },
+                "desiredFaceRatio": config.desiredFaceRatio,
+                "minZoom": config.minZoom,
+                "maxZoom": config.maxZoom,
+                "zIndex": i,
+            }
+            for i, slot in enumerate(config.slots)
+        ],
+        "metadata": {"category": "custom", "tags": [], "author": "Admin"},
+        "name_text": config.name_text.model_dump() if config.name_text else {},
+        "designation_text": config.designation_text.model_dump() if config.designation_text else {},
+        "fg_offset": fg_offset,
+        "baseline": baseline,
+        "luggage_card_mode": config.luggage_card_mode,
+        "print_dpi": config.print_dpi,
+        "print_width_mm": config.print_width_mm,
+        "print_height_mm": config.print_height_mm,
+        "output_format": config.output_format,
+    }
+
+
+def _make_sample_cutout(w: int = 1000, h: int = 1400):
+    """A synthetic waist-up person cutout (transparent bg) for Test Render previews.
+    Clean alpha mask so baseline/slot placement behaves exactly as with a real photo."""
+    from PIL import Image, ImageDraw
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    cx = w // 2
+    shoulder = int(w * 0.64)
+    torso_top = int(h * 0.42)
+    bottom = int(h * 0.99)
+    shirt = (78, 110, 168, 255)
+    skin = (223, 190, 159, 255)
+    # torso (rounded trapezoid: shoulders wider than the neck)
+    d.polygon([
+        (cx - shoulder // 2, bottom), (cx + shoulder // 2, bottom),
+        (cx + int(shoulder * 0.34), torso_top), (cx - int(shoulder * 0.34), torso_top),
+    ], fill=shirt)
+    # neck
+    d.rectangle([cx - int(w * 0.065), torso_top - int(h * 0.06), cx + int(w * 0.065), torso_top + 8], fill=skin)
+    # head
+    hr = int(w * 0.16)
+    hcy = torso_top - int(h * 0.06) - hr
+    d.ellipse([cx - hr, hcy - hr, cx + hr, hcy + hr], fill=skin)
+    return img
+
+
 @router.put("/templates/{template_id}/config")
 async def update_template_config(template_id: str, config: TemplateConfigUpdate):
     """
@@ -325,60 +398,17 @@ async def update_template_config(template_id: str, config: TemplateConfigUpdate)
         existing_fg_path = existing_meta.get("fg_path", "")
         fg_path_to_save = config.fg_path if config.fg_path else existing_fg_path
 
-        # Build the complete JSON config
-        template_json = {
-            "templateId": template_id,
-            "name": config.name,
-            "templateType": config.templateType,
-            "compositeMode": config.compositeMode,
-            "pngUrl": original_png_url,
-            "png_path": original_png_url,
-            "fg_path": fg_path_to_save,
-            "anchorMode": config.anchorMode,
-            "stickerFilter": config.stickerFilter,
-            "showVisualGuide": config.showVisualGuide,
-            "allowManualPositioning": config.allowManualPositioning,
-            "dimensions": config.dimensions,
-            "slots": [
-                {
-                    "slotId": slot.id,
-                    "x": slot.x,
-                    "y": slot.y,
-                    "width": slot.width,
-                    "height": slot.height,
-                    "anchor": {
-                        # Convert relative (0-1) to absolute pixels
-                        "targetX": int(slot.width * slot.anchorX),
-                        "targetY": int(slot.height * slot.anchorY),
-                    },
-                    "desiredFaceRatio": config.desiredFaceRatio,
-                    "minZoom": config.minZoom,
-                    "maxZoom": config.maxZoom,
-                    "zIndex": i
-                }
-                for i, slot in enumerate(config.slots)
-            ],
-            "metadata": {
-                "category": "custom",
-                "tags": [],
-                "author": "Admin"
-            },
-            # Text overlay config (magazine + sticker/luggage card)
-            # When the user unchecks a field, frontend sends None — we save {} to clear it.
-            # Do NOT fall back to existing_meta here, or unchecking would never persist.
-            "name_text": config.name_text.model_dump() if config.name_text else {},
-            "designation_text": config.designation_text.model_dump() if config.designation_text else {},
-            "fg_offset": config.fg_offset if config.fg_offset is not None else existing_meta.get("fg_offset", {"x": 0, "y": 0}),
-            # Baseline placement segment (preserve existing if frontend omitted it)
-            "baseline": config.baseline if config.baseline is not None else existing_meta.get("baseline"),
-            # Luggage card printing mode
-            "luggage_card_mode": config.luggage_card_mode,
-            "print_dpi": config.print_dpi,
-            "print_width_mm": config.print_width_mm,
-            "print_height_mm": config.print_height_mm,
-            "output_format": config.output_format,
-        }
-        
+        # Text overlay: when the user unchecks a field the frontend sends None and we
+        # save {} to clear it — do NOT fall back to existing_meta, or unchecking would
+        # never persist. fg_offset/baseline DO fall back to existing when omitted.
+        fg_offset = config.fg_offset if config.fg_offset is not None else existing_meta.get("fg_offset", {"x": 0, "y": 0})
+        baseline = config.baseline if config.baseline is not None else existing_meta.get("baseline")
+
+        # Build the complete JSON config (shared shape with the Test Render preview)
+        template_json = _config_to_template_json(
+            template_id, config, original_png_url, fg_path_to_save, fg_offset, baseline
+        )
+
         # Write to file
         with open(meta_path, 'w') as f:
             json.dump(template_json, f, indent=2)
@@ -390,6 +420,59 @@ async def update_template_config(template_id: str, config: TemplateConfigUpdate)
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Save failed: {str(e)}")
+
+
+@router.post("/templates/preview")
+async def preview_template(config: TemplateConfigUpdate):
+    """
+    Test Render: composite the CURRENT (possibly unsaved) editor config with a
+    synthetic sample cutout and return the image — exactly what the booth would
+    produce — so the operator can verify placement without saving or using the booth.
+    """
+    from services.compose import compose_service as engine, build_metadata_from_config
+
+    # config.pngUrl is a display URL stem (e.g. ".../{id}/image") — NOT the real
+    # file. Resolve the actual PNG from the saved template JSON, exactly like save.
+    png_url = config.pngUrl or ""
+    for filename in os.listdir(TEMPLATES_DIR):
+        if not filename.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(TEMPLATES_DIR, filename), 'r') as f:
+                meta_j = json.load(f)
+            if (meta_j.get("id") or meta_j.get("templateId")) == config.templateId:
+                png_url = meta_j.get("pngUrl") or meta_j.get("png_path") or png_url
+                break
+        except Exception:
+            continue
+
+    fg_offset = config.fg_offset if config.fg_offset is not None else {"x": 0, "y": 0}
+    data = _config_to_template_json(
+        config.templateId, config, png_url, config.fg_path or "", fg_offset, config.baseline
+    )
+
+    meta = build_metadata_from_config(data, TEMPLATES_DIR)
+    if meta is None:
+        raise HTTPException(status_code=400, detail="Could not build preview metadata from config")
+
+    template_path = os.path.join(TEMPLATES_DIR, meta.png_path) if meta.png_path else None
+    sample = _make_sample_cutout()
+    try:
+        result = engine.compose_final(
+            template_path=template_path,
+            stickers=[{"image": sample, "landmarks": None}],
+            template_meta=meta,
+            processing_mode="sticker",
+            overlay_name="Rajesh Kumar",
+            overlay_designation="Team Lead",
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Preview render failed: {e}")
+
+    buf = io.BytesIO()
+    result.convert("RGB").save(buf, format="JPEG", quality=88)
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="image/jpeg")
 
 
 from functools import lru_cache as _lru_cache

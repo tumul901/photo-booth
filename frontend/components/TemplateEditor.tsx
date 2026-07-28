@@ -12,7 +12,7 @@
  * - Preview and save configuration
  */
 
-import { useRef, useState, useEffect, useCallback } from 'react';
+import { useRef, useState, useEffect, useLayoutEffect, useCallback } from 'react';
 import styles from './TemplateEditor.module.css';
 
 // Types
@@ -123,6 +123,52 @@ function computeSnap(
   return { snappedX, snappedY, guides };
 }
 
+// Snap a single coordinate to the nearest edge/third/center reference within
+// threshold. Returns the snapped value and which reference caught (null = none).
+function snapAxis(v: number, refs: number[], thr: number): { v: number; ref: number | null } {
+  let best = v, bestRef: number | null = null, min = thr + 1;
+  for (const r of refs) { const d = Math.abs(v - r); if (d < min) { min = d; best = r; bestRef = r; } }
+  return bestRef !== null && min <= thr ? { v: best, ref: bestRef } : { v, ref: null };
+}
+
+// Label an edge/center/third reference for the on-canvas snap guide.
+function refLabel(r: number, extent: number): string {
+  const near = (a: number, b: number) => Math.abs(a - b) < 0.5;
+  return near(r, 0) || near(r, extent) ? 'edge' : near(r, extent / 2) ? 'center' : '⅓';
+}
+
+// Thickness (CSS px) of the numbered ruler gutters framing the canvas.
+const RULER = 26;
+
+// High-quality downscale. Painting a huge source (e.g. 5052px) straight into a
+// small canvas is ONE lossy drawImage that aliases fine detail into the "pixelated"
+// softness. Instead we halve the source repeatedly until it's within ~2× of the
+// target, then do the final resample — mipmap-style, so thin lines survive.
+// Returns an offscreen canvas sized exactly target×.
+function makePrescaled(
+  src: CanvasImageSource, sw: number, sh: number, targetW: number, targetH: number,
+): HTMLCanvasElement {
+  let cur: CanvasImageSource = src, curW = sw, curH = sh;
+  while (curW > targetW * 2 && curH > targetH * 2) {
+    const nw = Math.max(targetW, Math.floor(curW / 2));
+    const nh = Math.max(targetH, Math.floor(curH / 2));
+    const step = document.createElement('canvas');
+    step.width = nw; step.height = nh;
+    const sctx = step.getContext('2d')!;
+    sctx.imageSmoothingEnabled = true; sctx.imageSmoothingQuality = 'high';
+    sctx.drawImage(cur, 0, 0, nw, nh);
+    cur = step; curW = nw; curH = nh;
+  }
+  const out = document.createElement('canvas');
+  out.width = Math.max(1, targetW); out.height = Math.max(1, targetH);
+  const octx = out.getContext('2d')!;
+  octx.imageSmoothingEnabled = true; octx.imageSmoothingQuality = 'high';
+  octx.drawImage(cur, 0, 0, out.width, out.height);
+  return out;
+}
+
+type PrescaleCache = { current: { w: number; h: number; canvas: HTMLCanvasElement } | null };
+
 interface TemplateConfig {
   templateId: string;
   name: string;
@@ -159,7 +205,7 @@ interface TemplateEditorProps {
   onCancel: () => void;
 }
 
-type EditorMode = 'select' | 'draw' | 'anchor' | 'fg' | 'baseline';
+type EditorMode = 'select' | 'draw' | 'anchor' | 'fg' | 'baseline' | 'pan';
 
 interface Baseline { x1: number; x2: number; y: number }
 
@@ -181,7 +227,10 @@ export default function TemplateEditor({
   // Image state
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
-  const [scale, setScale] = useState(1); // Display scale for fitting in viewport
+  // Display scale = fitScale (scale that fits the whole card in the viewport)
+  // × zoom (user zoom multiplier; 1 = Fit). `scale` itself is derived below.
+  const [fitScale, setFitScale] = useState(1);
+  const [zoom, setZoom] = useState(1);
   
   // Loading state for fetching config
   const [configLoaded, setConfigLoaded] = useState(false);
@@ -254,6 +303,22 @@ export default function TemplateEditor({
 
   // Dragging state for text markers
   const [draggingText, setDraggingText] = useState<'name' | 'designation' | null>(null);
+  // Last-touched text box — target for arrow-key nudging (cleared on Esc).
+  const [selectedText, setSelectedText] = useState<'name' | 'designation' | null>(null);
+  // Brief highlight of the guide a baseline just snapped to (fades after ~450ms),
+  // so the magnet is visible instead of feeling "random".
+  const [snapFlash, setSnapFlash] = useState<{ x: number | null; y: number | null } | null>(null);
+  const snapFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flashSnap = (x: number | null, y: number | null) => {
+    setSnapFlash({ x, y });
+    if (snapFlashTimer.current) clearTimeout(snapFlashTimer.current);
+    snapFlashTimer.current = setTimeout(() => setSnapFlash(null), 450);
+  };
+
+  // Editing a committed baseline: drag the line to move it, an endpoint to resize.
+  const [draggingBaseline, setDraggingBaseline] = useState<null | 'move' | 'x1' | 'x2'>(null);
+  const [baselineHover, setBaselineHover] = useState<null | 'move' | 'x1' | 'x2'>(null);
+  const baselineDragRef = useRef<{ grabX: number; grabY: number; orig: Baseline } | null>(null);
 
   // FG drag + snap guide state
   const [fgOffset, setFgOffset] = useState({ x: 0, y: 0 });
@@ -266,6 +331,301 @@ export default function TemplateEditor({
   const [snapEnabled, setSnapEnabled] = useState(true);
   // Live cursor position (image-native px), shown in the ruler readout HUD.
   const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(null);
+  // Dismissable per-mode instructions overlay (so it stops covering the artwork).
+  const [showInstructions, setShowInstructions] = useState(true);
+
+  // ---- Zoom / pan / rulers ----
+  const scrollRef = useRef<HTMLDivElement>(null);       // scrollable viewport around the canvas
+  const topRulerRef = useRef<HTMLCanvasElement>(null);  // horizontal gutter
+  const leftRulerRef = useRef<HTMLCanvasElement>(null); // vertical gutter
+  const [isPanning, setIsPanning] = useState(false);
+  const spaceHeldRef = useRef(false);
+  const panRef = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
+  // Pending focal point for zoom-to-cursor, applied once the canvas has resized.
+  const zoomFocalRef = useRef<{ ix: number; iy: number; clientX: number; clientY: number } | null>(null);
+  // Latest nav values for the native (stable) wheel/key listeners to read.
+  const navRef = useRef({ scale: 1, fitScale: 1, maxScale: 1, minScale: 1, zoom: 1 });
+  // Offscreen high-quality downscales so huge templates render crisp, not soft.
+  const mainPrescaleRef = useRef<{ w: number; h: number; canvas: HTMLCanvasElement } | null>(null);
+  const fgPrescaleRef = useRef<{ w: number; h: number; canvas: HTMLCanvasElement } | null>(null);
+
+  // ---- Derived scale / sizing ----
+  const dpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
+  // Cap the backing store so a 100% view of a 5000px template can't allocate a
+  // runaway canvas. 8192 lets a small (e.g. luggage-card 638×1016) canvas zoom
+  // to ~5× for precise baseline/slot placement, while a full 5000px template
+  // still tops out at a sane ~168 MB backing store.
+  const MAX_BACKING = 8192;
+  const maxScale = imageDimensions.width > 0
+    ? Math.max(fitScale, Math.min(
+        MAX_BACKING / (imageDimensions.width * dpr),
+        MAX_BACKING / (imageDimensions.height * dpr),
+      ))
+    : fitScale;
+  // Zoom out to ~15% (or fit, if fit is already smaller) so you can pull back and
+  // see the whole card with margin; zoom in up to the backing-store cap.
+  const minScale = Math.min(fitScale, 0.15);
+  const scale = Math.min(Math.max(fitScale * zoom, minScale), maxScale);
+  const cssW = Math.max(1, Math.round(imageDimensions.width * scale));
+  const cssH = Math.max(1, Math.round(imageDimensions.height * scale));
+
+  // Mirror latest nav state for the stable native listeners (avoid render-time
+  // ref mutation — the React Compiler prefers this in an effect).
+  useEffect(() => { navRef.current = { scale, fitScale, maxScale, minScale, zoom }; });
+
+  // Cached high-quality downscale of an image for the current backing-store size.
+  const getPrescaled = useCallback((
+    cache: PrescaleCache, img: HTMLImageElement, targetW: number, targetH: number,
+  ): CanvasImageSource => {
+    if (img.width <= targetW * 1.02) return img; // not downscaling → source is already fine
+    const c = cache.current;
+    if (c && c.w === targetW && c.h === targetH) return c.canvas;
+    const canvas = makePrescaled(img, img.width, img.height, targetW, targetH);
+    cache.current = { w: targetW, h: targetH, canvas };
+    return canvas;
+  }, []);
+
+  // Fit the whole card into the scroll viewport (called on load + resize).
+  const recomputeFit = useCallback(() => {
+    const vp = scrollRef.current;
+    if (!vp || imageDimensions.width < 1 || imageDimensions.height < 1) return;
+    const pad = 40; // breathing room around the card
+    const availW = Math.max(80, vp.clientWidth - pad);
+    const availH = Math.max(80, vp.clientHeight - pad);
+    const s = Math.min(availW / imageDimensions.width, availH / imageDimensions.height);
+    // Allow modest upscaling for tiny templates, but never so far it looks soft.
+    setFitScale(Math.max(0.02, Math.min(s, 3)));
+  }, [imageDimensions]);
+
+  useEffect(() => {
+    if (!imageLoaded) return;
+    recomputeFit();
+    window.addEventListener('resize', recomputeFit);
+    return () => window.removeEventListener('resize', recomputeFit);
+  }, [imageLoaded, recomputeFit]);
+
+  // Zoom to an absolute multiplier, optionally keeping the point under the cursor
+  // fixed (Figma-style). Stable (reads navRef) so native wheel/key handlers can use it.
+  const zoomAt = useCallback((absoluteZoom: number, clientX?: number, clientY?: number) => {
+    const { fitScale: fs, maxScale: ms, minScale: mns, scale: sc } = navRef.current;
+    const cvs = canvasRef.current;
+    if (cvs && clientX != null && clientY != null) {
+      const r = cvs.getBoundingClientRect();
+      zoomFocalRef.current = { ix: (clientX - r.left) / sc, iy: (clientY - r.top) / sc, clientX, clientY };
+    } else {
+      zoomFocalRef.current = null;
+    }
+    const minZ = mns / fs;                 // lets you zoom out below Fit
+    const maxZ = Math.max(minZ, ms / fs);
+    setZoom(Math.min(Math.max(absoluteZoom, minZ), maxZ));
+  }, []);
+
+  // Don't hijack Space / zoom keys while typing in a field.
+  const isEditableTarget = (t: EventTarget | null) => {
+    const el = t as HTMLElement | null;
+    return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+  };
+
+  const startPan = (clientX: number, clientY: number) => {
+    const vp = scrollRef.current;
+    if (!vp) return;
+    panRef.current = { x: clientX, y: clientY, left: vp.scrollLeft, top: vp.scrollTop };
+    setIsPanning(true);
+  };
+
+  // Draw the numbered ruler gutters (top + left), tracking zoom + scroll. Labels
+  // are mm in Luggage Card mode, else image px. A magenta tick shows the cursor.
+  const drawRulers = useCallback(() => {
+    const vp = scrollRef.current, cvs = canvasRef.current;
+    const topEl = topRulerRef.current, leftEl = leftRulerRef.current;
+    if (!vp || !cvs || !topEl || !leftEl || imageDimensions.width < 1) return;
+    const ratio = window.devicePixelRatio || 1;
+    const vr = vp.getBoundingClientRect();
+    const cr = cvs.getBoundingClientRect();
+    const originX = cr.left - vr.left; // where image x=0 sits inside the top gutter (CSS px)
+    const originY = cr.top - vr.top;
+    const spanW = vp.clientWidth, spanH = vp.clientHeight;
+
+    const mm = luggageCardMode;
+    const pxPerUnit = mm ? (printDpi / 25.4) : 1; // image px per ruler unit
+    const nice = (raw: number) => {
+      if (raw <= 0 || !isFinite(raw)) return 1;
+      const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+      const n = raw / pow;
+      return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * pow;
+    };
+    const stepUnits = nice((64 / scale) / pxPerUnit); // aim ~64 px between labels
+
+    const renderRuler = (c: HTMLCanvasElement, horizontal: boolean, origin: number, span: number, extentPx: number) => {
+      const t = RULER;
+      const w = horizontal ? span : t, h = horizontal ? t : span;
+      c.width = Math.round(w * ratio); c.height = Math.round(h * ratio);
+      c.style.width = `${w}px`; c.style.height = `${h}px`;
+      const g = c.getContext('2d'); if (!g) return;
+      g.setTransform(ratio, 0, 0, ratio, 0, 0);
+      g.fillStyle = '#12121c'; g.fillRect(0, 0, w, h);
+      g.font = '10px ui-monospace, SFMono-Regular, monospace';
+      const maxUnit = extentPx / pxPerUnit;
+      for (let u = 0; u <= maxUnit + 1e-6; u += stepUnits) {
+        const screen = origin + u * pxPerUnit * scale;
+        // minor ticks between this label and the next
+        for (let k = 1; k < 5; k++) {
+          const sp = origin + (u + stepUnits * k / 5) * pxPerUnit * scale;
+          if (sp < 0 || sp > span) continue;
+          g.strokeStyle = 'rgba(180,200,230,0.22)'; g.lineWidth = 1;
+          g.beginPath();
+          if (horizontal) { g.moveTo(sp, t); g.lineTo(sp, t - 4); } else { g.moveTo(t, sp); g.lineTo(t - 4, sp); }
+          g.stroke();
+        }
+        if (screen < -30 || screen > span + 30) continue;
+        g.strokeStyle = 'rgba(185,205,235,0.6)'; g.lineWidth = 1;
+        g.beginPath();
+        if (horizontal) { g.moveTo(screen, t); g.lineTo(screen, t - 9); } else { g.moveTo(t, screen); g.lineTo(t - 9, screen); }
+        g.stroke();
+        g.fillStyle = 'rgba(198,214,238,0.92)';
+        const lbl = `${Math.round(u)}`;
+        if (horizontal) { g.textAlign = 'left'; g.textBaseline = 'top'; g.fillText(lbl, screen + 3, 2); }
+        else { g.save(); g.translate(t - 3, screen - 3); g.rotate(-Math.PI / 2); g.textAlign = 'left'; g.textBaseline = 'bottom'; g.fillText(lbl, 0, 0); g.restore(); }
+      }
+      // cursor crosshair marker
+      if (hoverPos) {
+        const sp = origin + (horizontal ? hoverPos.x : hoverPos.y) * scale;
+        if (sp >= 0 && sp <= span) {
+          g.strokeStyle = '#ff2d78'; g.lineWidth = 1.5;
+          g.beginPath();
+          if (horizontal) { g.moveTo(sp, 0); g.lineTo(sp, t); } else { g.moveTo(0, sp); g.lineTo(t, sp); }
+          g.stroke();
+        }
+      }
+    };
+    renderRuler(topEl, true, originX, spanW, imageDimensions.width);
+    renderRuler(leftEl, false, originY, spanH, imageDimensions.height);
+  }, [scale, imageDimensions, luggageCardMode, printDpi, hoverPos]);
+
+  // Redraw rulers on scale/scroll/resize/cursor changes.
+  useEffect(() => {
+    drawRulers();
+    const vp = scrollRef.current;
+    if (!vp) return;
+    const onScroll = () => drawRulers();
+    vp.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', drawRulers);
+    return () => { vp.removeEventListener('scroll', onScroll); window.removeEventListener('resize', drawRulers); };
+  }, [drawRulers]);
+
+  // After a zoom changes the canvas size, scroll so the focal point stays put.
+  useLayoutEffect(() => {
+    const f = zoomFocalRef.current;
+    const vp = scrollRef.current, cvs = canvasRef.current;
+    if (!f || !vp || !cvs) return;
+    zoomFocalRef.current = null;
+    const vr = vp.getBoundingClientRect();
+    const cr = cvs.getBoundingClientRect();
+    const curX = (cr.left - vr.left) + f.ix * scale;
+    const curY = (cr.top - vr.top) + f.iy * scale;
+    vp.scrollLeft += curX - (f.clientX - vr.left);
+    vp.scrollTop += curY - (f.clientY - vr.top);
+    drawRulers();
+  }, [scale, drawRulers]);
+
+  // Ctrl/⌘ + wheel = zoom to cursor; plain wheel = native scroll (pan).
+  useEffect(() => {
+    const vp = scrollRef.current;
+    if (!vp) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+      zoomAt(navRef.current.zoom * factor, e.clientX, e.clientY);
+    };
+    vp.addEventListener('wheel', onWheel, { passive: false });
+    return () => vp.removeEventListener('wheel', onWheel);
+  }, [zoomAt]);
+
+  // Keyboard: Space = pan grab; Ctrl/⌘ +/-/0 = zoom in/out/fit.
+  useEffect(() => {
+    const kd = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !isEditableTarget(e.target)) { spaceHeldRef.current = true; e.preventDefault(); }
+      if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) { e.preventDefault(); zoomAt(navRef.current.zoom * 1.25); }
+      if ((e.ctrlKey || e.metaKey) && e.key === '-') { e.preventDefault(); zoomAt(navRef.current.zoom / 1.25); }
+      if ((e.ctrlKey || e.metaKey) && e.key === '0') { e.preventDefault(); setZoom(1); }
+    };
+    const ku = (e: KeyboardEvent) => { if (e.code === 'Space') spaceHeldRef.current = false; };
+    window.addEventListener('keydown', kd);
+    window.addEventListener('keyup', ku);
+    return () => { window.removeEventListener('keydown', kd); window.removeEventListener('keyup', ku); };
+  }, [zoomAt]);
+
+  // Arrow-key nudge for the baseline while the Draw Baseline tool is active.
+  // ↑/↓ move it vertically, ←/→ slide the whole line; Shift = 10px steps.
+  useEffect(() => {
+    if (mode !== 'baseline') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (isEditableTarget(e.target)) return;
+      if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+      const step = e.shiftKey ? 10 : 1;
+      e.preventDefault();
+      setBaseline(b => {
+        if (!b) return b;
+        const W = imageDimensions.width, H = imageDimensions.height;
+        const cl = (v: number, hi: number) => Math.max(0, Math.min(hi, v));
+        if (e.key === 'ArrowUp') return { ...b, y: cl(b.y - step, H) };
+        if (e.key === 'ArrowDown') return { ...b, y: cl(b.y + step, H) };
+        const dx = e.key === 'ArrowLeft' ? -step : step;
+        return { ...b, x1: cl(b.x1 + dx, W), x2: cl(b.x2 + dx, W) };
+      });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mode, imageDimensions.width, imageDimensions.height]);
+
+  // Arrow-key nudge for the last-touched text box (when not drawing a baseline).
+  useEffect(() => {
+    if (!selectedText || mode === 'baseline') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (isEditableTarget(e.target)) return;
+      if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+      const step = e.shiftKey ? 10 : 1;
+      e.preventDefault();
+      const set = selectedText === 'name' ? setNameTextConfig : setDesignationTextConfig;
+      const W = imageDimensions.width, H = imageDimensions.height;
+      const cl = (v: number, hi: number) => Math.max(0, Math.min(hi, v));
+      set(p => {
+        let x = p.x, y = p.y;
+        if (e.key === 'ArrowUp') y = cl(y - step, H);
+        else if (e.key === 'ArrowDown') y = cl(y + step, H);
+        else if (e.key === 'ArrowLeft') x = cl(x - step, W);
+        else x = cl(x + step, W);
+        return { ...p, x, y };
+      });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedText, mode, imageDimensions.width, imageDimensions.height]);
+
+  // Single-key tool shortcuts (Figma-style) + Esc to cancel/deselect.
+  // Ignored while typing or when a modifier is held (so Ctrl+D etc. pass through).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isEditableTarget(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
+      switch (e.key.toLowerCase()) {
+        case 'v': setMode('select'); break;
+        case 'h': setMode('pan'); break;
+        case 'd': setMode('draw'); break;
+        case 'b': setMode('baseline'); break;
+        case 'escape':
+          isDrawingBaseline.current = false;
+          setBaselineDraft(null);
+          setSelectedSlotIndex(null);
+          setSelectedText(null);
+          setMode('select');
+          break;
+        default: return;
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   // Load available custom fonts
   useEffect(() => {
@@ -307,7 +667,7 @@ export default function TemplateEditor({
       return;
     }
     const fg = new Image();
-    fg.onload = () => setFgImageRef(fg);
+    fg.onload = () => { fgPrescaleRef.current = null; setFgImageRef(fg); };
     fg.onerror = () => setFgImageRef(null);
     fg.src = `${API_BASE_URL}/api/admin/templates/${templateId}/fg-image?t=${Date.now()}`;
   }, [compositeMode, templateId]);
@@ -470,12 +830,43 @@ export default function TemplateEditor({
     }
   }, [configLoaded, luggageCardMode, printWidthMm, printHeightMm, printDpi, imageLoaded]);
 
+  // Canvas dims captured when a mm field gains focus, so we can rescale overlays
+  // exactly once on blur (final/initial) instead of compounding per keystroke.
+  const cardResizeAnchorRef = useRef<{ width: number; height: number } | null>(null);
+
+  // Rescale every canvas-pixel overlay when the canvas dimensions change, so a
+  // resize keeps each element in the SAME relative spot instead of jumping.
+  // fx / fy are the per-axis scale factors (newDim / oldDim). Font scales by the
+  // mean of the two (exact for uniform scales like DPI/CR80).
+  const rescaleOverlays = (fx: number, fy: number) => {
+    if (!isFinite(fx) || !isFinite(fy) || (fx === 1 && fy === 1)) return;
+    const fFont = (fx + fy) / 2;
+    setSlots(prev => prev.map(s => ({
+      ...s,
+      x: Math.round(s.x * fx), width: Math.round(s.width * fx),
+      y: Math.round(s.y * fy), height: Math.round(s.height * fy),
+    })));
+    setBaseline(prev => prev ? {
+      x1: Math.round(prev.x1 * fx), x2: Math.round(prev.x2 * fx), y: Math.round(prev.y * fy),
+    } : prev);
+    setFgOffset(prev => ({ x: Math.round(prev.x * fx), y: Math.round(prev.y * fy) }));
+    const scaleText = (p: TextConfig): TextConfig => ({
+      ...p,
+      x: Math.round(p.x * fx), y: Math.round(p.y * fy),
+      fontSize: Math.max(1, Math.round(p.fontSize * fFont)),
+      maxWidth: p.maxWidth ? Math.round(p.maxWidth * fx) : 0,
+    });
+    setNameTextConfig(scaleText);
+    setDesignationTextConfig(scaleText);
+  };
+
   // Load template image
   useEffect(() => {
     const img = new Image();
     // Don't set crossOrigin for same-origin requests (localhost)
     img.onload = () => {
       imageRef.current = img;
+      mainPrescaleRef.current = null; // fresh source → drop the stale downscale cache
       setImageDimensions({ width: img.width, height: img.height });
       setImageLoaded(true);
       setImageError(null);
@@ -487,18 +878,7 @@ export default function TemplateEditor({
     img.src = imageUrl;
   }, [imageUrl]);
 
-  // Calculate display scale to fit in container
-  useEffect(() => {
-    if (!containerRef.current || !imageLoaded) return;
-    
-    const container = containerRef.current;
-    const maxWidth = container.clientWidth - 40; // Padding
-    const maxHeight = window.innerHeight - 300; // Leave room for controls
-    
-    const scaleX = maxWidth / imageDimensions.width;
-    const scaleY = maxHeight / imageDimensions.height;
-    setScale(Math.min(scaleX, scaleY, 1)); // Don't scale up
-  }, [imageLoaded, imageDimensions]);
+  // (Fit scale is computed by recomputeFit above.)
 
   // Redraw canvas
   const redrawCanvas = useCallback(() => {
@@ -508,25 +888,48 @@ export default function TemplateEditor({
     
     if (!canvas || !ctx || !img || !imageLoaded) return;
 
-    // HiDPI-aware sizing: the backing store is rendered at device pixels (×dpr)
-    // while CSS keeps the on-screen size, so the image isn't upscaled/blurred on
-    // Retina/4K/Windows-scaled displays. All drawing below stays in CSS px because
-    // we scale the context by dpr once here.
-    const dpr = window.devicePixelRatio || 1;
-    const cssW = imageDimensions.width * scale;
-    const cssH = imageDimensions.height * scale;
-    canvas.width = Math.round(cssW * dpr);
-    canvas.height = Math.round(cssH * dpr);
-    canvas.style.width = `${cssW}px`;
-    canvas.style.height = `${cssH}px`;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // HiDPI-aware backing store: render at device pixels (×dpr) so the image
+    // isn't blurred on Retina/4K/Windows-scaled displays. The on-screen CSS size
+    // is set via the element's inline style (in JSX) so layout is correct before
+    // effects run; here we own only the backing store + coordinate transform.
+    const dprLocal = window.devicePixelRatio || 1;
+    const w = Math.max(1, Math.round(imageDimensions.width * scale));
+    const h = Math.max(1, Math.round(imageDimensions.height * scale));
+    const cssW = w, cssH = h; // aliases used by the overlay drawing below
+    const bw = Math.round(w * dprLocal), bh = Math.round(h * dprLocal);
+    canvas.width = bw;
+    canvas.height = bh;
+    ctx.setTransform(dprLocal, 0, 0, dprLocal, 0, 0);
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
 
-    // Clear and draw image (CSS-pixel coordinate space)
-    ctx.clearRect(0, 0, cssW, cssH);
-    ctx.drawImage(img, 0, 0, cssW, cssH);
-    
+    // Clear and draw the image at device resolution via a high-quality prescale,
+    // so a huge source (e.g. 5052px) painted into a small canvas stays crisp
+    // instead of aliasing into the old "pixelated" softness.
+    ctx.clearRect(0, 0, w, h);
+    const mainSrc = getPrescaled(mainPrescaleRef, img, bw, bh);
+    ctx.drawImage(mainSrc, 0, 0, w, h);
+
+    // Static alignment reference — the rule-of-thirds + center lines the magnet
+    // snaps to. Faint so they never fight the artwork; an ACTIVE snap lights up
+    // bright (drawn later). Shown only while snapping is enabled.
+    if (snapEnabled && imageDimensions.width > 0) {
+      ctx.save();
+      ctx.lineWidth = 1;
+      ctx.setLineDash([]);
+      const vlines = [imageDimensions.width / 3, imageDimensions.width / 2, (2 * imageDimensions.width) / 3];
+      const hlines = [imageDimensions.height / 3, imageDimensions.height / 2, (2 * imageDimensions.height) / 3];
+      for (const gx of vlines) {
+        ctx.strokeStyle = Math.abs(gx - imageDimensions.width / 2) < 0.5 ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.07)';
+        ctx.beginPath(); ctx.moveTo(gx * scale, 0); ctx.lineTo(gx * scale, cssH); ctx.stroke();
+      }
+      for (const gy of hlines) {
+        ctx.strokeStyle = Math.abs(gy - imageDimensions.height / 2) < 0.5 ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.07)';
+        ctx.beginPath(); ctx.moveTo(0, gy * scale); ctx.lineTo(cssW, gy * scale); ctx.stroke();
+      }
+      ctx.restore();
+    }
+
     // Draw existing slots
     slots.forEach((slot, index) => {
       const isSelected = index === selectedSlotIndex;
@@ -589,6 +992,39 @@ export default function TemplateEditor({
       const lx = Math.min(x1, x2);
       const rx = Math.max(x1, x2);
       const midx = (x1 + x2) / 2;
+
+      // WYSIWYG ghost: a translucent head-and-shoulders silhouette showing where
+      // the subject will land — shoulders span the line width, body-bottom on the
+      // line — so you position by what you SEE, not by imagining the backend rule.
+      const ww = rx - lx;
+      if (ww > 8) {
+        const cx = midx;
+        const bodyH = ww * 0.85;              // torso height up to the neck
+        const neckY = y - bodyH;
+        const headR = ww * 0.17;
+        const headCY = neckY - headR * 0.7;
+        const shoulderHalf = ww * 0.30;       // half-width at the neck
+        ctx.save();
+        ctx.fillStyle = 'rgba(34,211,238,0.13)';
+        ctx.strokeStyle = 'rgba(34,211,238,0.30)';
+        ctx.lineWidth = 1;
+        // shoulders/torso trapezoid with a soft neck notch
+        ctx.beginPath();
+        ctx.moveTo(lx, y);
+        ctx.lineTo(rx, y);
+        ctx.lineTo(cx + shoulderHalf, neckY);
+        ctx.quadraticCurveTo(cx, neckY - headR * 0.5, cx - shoulderHalf, neckY);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        // head
+        ctx.beginPath();
+        ctx.arc(cx, headCY, headR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+
       ctx.save();
       // the line
       ctx.strokeStyle = '#22d3ee';
@@ -598,12 +1034,15 @@ export default function TemplateEditor({
       ctx.moveTo(lx, y);
       ctx.lineTo(rx, y);
       ctx.stroke();
-      // endpoint handles
-      ctx.fillStyle = '#22d3ee';
-      for (const ex of [lx, rx]) {
+      // endpoint handles (grow + get a white ring when hovered/dragged)
+      const blActive = !!(draggingBaseline || baselineHover);
+      for (const [hx, key] of [[lx, 'x1'], [rx, 'x2']] as const) {
+        const isActiveEnd = draggingBaseline === key || baselineHover === key;
         ctx.beginPath();
-        ctx.arc(ex, y, 6, 0, Math.PI * 2);
+        ctx.arc(hx, y, isActiveEnd ? 9 : blActive ? 7 : 6, 0, Math.PI * 2);
+        ctx.fillStyle = '#22d3ee';
         ctx.fill();
+        if (isActiveEnd) { ctx.lineWidth = 2; ctx.strokeStyle = '#fff'; ctx.stroke(); }
       }
       // center tick (vertical)
       ctx.strokeStyle = '#fbbf24';
@@ -612,15 +1051,39 @@ export default function TemplateEditor({
       ctx.moveTo(midx, y - 14);
       ctx.lineTo(midx, y + 14);
       ctx.stroke();
-      // width label
-      const widthPx = Math.round(Math.abs(blToDraw.x2 - blToDraw.x1));
-      const label = `baseline · width ${widthPx}px`;
-      ctx.font = 'bold 13px sans-serif';
-      const tw = ctx.measureText(label).width;
-      ctx.fillStyle = 'rgba(0,0,0,0.6)';
-      ctx.fillRect(midx - tw / 2 - 5, y + 16, tw + 10, 20);
-      ctx.fillStyle = '#22d3ee';
-      ctx.fillText(label, midx - tw / 2, y + 30);
+      // width label — only while interacting (drawing/dragging/hovering); the
+      // numeric panel shows it otherwise. Sits ABOVE the line so it never
+      // collides with the name text below. Compact ("⟷ 438px").
+      if (baselineDraft || draggingBaseline || baselineHover) {
+        const widthPx = Math.round(Math.abs(blToDraw.x2 - blToDraw.x1));
+        const label = `⟷ ${widthPx}px`;
+        ctx.font = 'bold 12px sans-serif';
+        const tw = ctx.measureText(label).width;
+        const ly = y - 20;
+        ctx.fillStyle = 'rgba(2,6,23,0.82)';
+        ctx.fillRect(midx - tw / 2 - 6, ly - 13, tw + 12, 18);
+        ctx.fillStyle = '#67e8f9';
+        ctx.textAlign = 'center';
+        ctx.fillText(label, midx, ly);
+        ctx.textAlign = 'left';
+      }
+      ctx.restore();
+    }
+
+    // Snap-guide flash: the magenta line the baseline just snapped to (fades out).
+    if (snapFlash) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(236,72,153,0.9)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 5]);
+      if (snapFlash.y != null) {
+        const gy = snapFlash.y * scale;
+        ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(imageDimensions.width * scale, gy); ctx.stroke();
+      }
+      if (snapFlash.x != null) {
+        const gx = snapFlash.x * scale;
+        ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, imageDimensions.height * scale); ctx.stroke();
+      }
       ctx.restore();
     }
 
@@ -629,7 +1092,8 @@ export default function TemplateEditor({
       const fgDrawW = (fgImageRef.naturalWidth || imageDimensions.width) * scale;
       const fgDrawH = (fgImageRef.naturalHeight || imageDimensions.height) * scale;
       ctx.globalAlpha = 0.6;
-      ctx.drawImage(fgImageRef, fgOffset.x * scale, fgOffset.y * scale, fgDrawW, fgDrawH);
+      const fgSrc = getPrescaled(fgPrescaleRef, fgImageRef, Math.round(fgDrawW * dprLocal), Math.round(fgDrawH * dprLocal));
+      ctx.drawImage(fgSrc, fgOffset.x * scale, fgOffset.y * scale, fgDrawW, fgDrawH);
       ctx.globalAlpha = 1.0;
     }
 
@@ -834,56 +1298,7 @@ export default function TemplateEditor({
       if (hasDesignationText) drawTextBox('designation', designationTextConfig, designationPreview, '#4ade80', draggingText === 'designation');
     }
 
-    // Ruler overlay for luggage card mode — a faint 10mm grid plus readable
-    // numbered ticks on BOTH axes (the numbers are millimetres).
-    if (luggageCardMode && imageDimensions.width > 0) {
-      ctx.save();
-      // Faint grid so it doesn't fight the artwork
-      ctx.strokeStyle = 'rgba(120,190,255,0.16)';
-      ctx.lineWidth = 1;
-      ctx.setLineDash([3, 4]);
-      for (let xmm = 10; xmm < printWidthMm; xmm += 10) {
-        const xpx = (xmm / printWidthMm) * cssW;
-        ctx.beginPath(); ctx.moveTo(xpx, 0); ctx.lineTo(xpx, cssH); ctx.stroke();
-      }
-      for (let ymm = 10; ymm < printHeightMm; ymm += 10) {
-        const ypx = (ymm / printHeightMm) * cssH;
-        ctx.beginPath(); ctx.moveTo(0, ypx); ctx.lineTo(cssW, ypx); ctx.stroke();
-      }
-      ctx.setLineDash([]);
-
-      // Numbered ticks — bright, with a short solid tick at the edge
-      const lblFont = Math.max(9, 10 * scale);
-      ctx.font = `600 ${lblFont}px monospace`;
-      ctx.textBaseline = 'top';
-      ctx.textAlign = 'left';
-      ctx.strokeStyle = 'rgba(150,205,255,0.85)';
-      ctx.lineWidth = 1.5;
-      const tick = Math.max(5, 6 * scale);
-      const drawLabel = (txt: string, lx: number, ly: number) => {
-        const w = ctx.measureText(txt).width;
-        ctx.fillStyle = 'rgba(0,0,0,0.55)';
-        ctx.fillRect(lx - 1, ly - 1, w + 3, lblFont + 2);
-        ctx.fillStyle = 'rgba(190,225,255,0.98)';
-        ctx.fillText(txt, lx, ly);
-      };
-      for (let xmm = 10; xmm < printWidthMm; xmm += 10) {
-        const xpx = (xmm / printWidthMm) * cssW;
-        ctx.beginPath(); ctx.moveTo(xpx, 0); ctx.lineTo(xpx, tick); ctx.stroke();
-        drawLabel(`${xmm}`, xpx + 2, tick + 1);
-      }
-      for (let ymm = 10; ymm < printHeightMm; ymm += 10) {
-        const ypx = (ymm / printHeightMm) * cssH;
-        ctx.beginPath(); ctx.moveTo(0, ypx); ctx.lineTo(tick, ypx); ctx.stroke();
-        drawLabel(`${ymm}`, tick + 2, ypx + 1);
-      }
-      // Unit badge at the origin so it's unambiguous what the numbers mean
-      ctx.fillStyle = 'rgba(0,0,0,0.6)';
-      ctx.fillRect(0, 0, ctx.measureText('mm').width + 8, lblFont + 4);
-      ctx.fillStyle = 'rgba(190,225,255,0.98)';
-      ctx.fillText('mm', 3, 2);
-      ctx.restore();
-    }
+    // (Numbered mm/px ticks now live in the fixed ruler gutters — see drawRulers.)
 
     // Draw current drawing rectangle
     if (isDrawing && mode === 'draw') {
@@ -898,12 +1313,15 @@ export default function TemplateEditor({
       ctx.strokeRect(x, y, w, h);
       ctx.setLineDash([]);
     }
-  }, [imageLoaded, imageDimensions, scale, slots, selectedSlotIndex, isDrawing, mode, drawStart, drawCurrent, fgImageRef, showFgOverlay, compositeMode, hasNameText, nameTextConfig, hasDesignationText, designationTextConfig, draggingText, fgOffset, activeGuides, luggageCardMode, printWidthMm, printHeightMm, baseline, baselineDraft, loadedFontNames, namePreview, designationPreview]);
+  }, [imageLoaded, imageDimensions, scale, slots, selectedSlotIndex, isDrawing, mode, drawStart, drawCurrent, fgImageRef, showFgOverlay, compositeMode, hasNameText, nameTextConfig, hasDesignationText, designationTextConfig, draggingText, fgOffset, activeGuides, snapEnabled, baseline, baselineDraft, draggingBaseline, baselineHover, snapFlash, loadedFontNames, namePreview, designationPreview, getPrescaled]);
 
   // Redraw on state changes
   useEffect(() => {
     redrawCanvas();
   }, [redrawCanvas]);
+
+  // Re-surface the instructions whenever the tool changes (new context to explain).
+  useEffect(() => { setShowInstructions(true); }, [mode]);
 
   // Get mouse position relative to canvas in image coordinates
   const getImageCoords = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -939,17 +1357,50 @@ export default function TemplateEditor({
     return null;
   };
 
-  // Snap a baseline to the template edges when an endpoint/line lands near one.
-  // Lets "drag to the bottom" land flush on the last pixel (no gap under the subject).
+  // Snap a baseline to predictable geometric magnets (edges, center, thirds,
+  // quarters). Lets "drag to the bottom" land flush on the last pixel.
   const snapBaselineToEdges = (b: Baseline): Baseline => {
+    if (!snapEnabled) return b;
     const W = imageDimensions.width, H = imageDimensions.height;
     const t = Math.max(8, Math.round(Math.min(W, H) * 0.02)); // ~2% of the short side
-    const snap = (v: number, max: number) => (v < t ? 0 : Math.abs(v - max) < t ? max : v);
-    return { x1: snap(b.x1, W), x2: snap(b.x2, W), y: snap(b.y, H) };
+    const xT = [0, W, W / 2, W / 3, (2 * W) / 3, W / 4, (3 * W) / 4];
+    const yT = [0, H, H / 2, H / 3, (2 * H) / 3, H / 4, (3 * H) / 4];
+    const snap = (v: number, targets: number[]) => {
+      let best = v, bestD = t, hit: number | null = null;
+      for (const tgt of targets) {
+        const d = Math.abs(v - tgt);
+        if (d < bestD) { bestD = d; best = Math.round(tgt); hit = Math.round(tgt); }
+      }
+      return { val: best, hit };
+    };
+    const rx1 = snap(b.x1, xT), rx2 = snap(b.x2, xT), ry = snap(b.y, yT);
+    const fx = rx1.hit ?? rx2.hit;
+    if (fx !== null || ry.hit !== null) flashSnap(fx, ry.hit);
+    return { x1: rx1.val, x2: rx2.val, y: ry.val };
+  };
+
+  // Hit-test a committed baseline: 'x1'/'x2' = the endpoint handles, 'move' = the
+  // line body. Tolerances are in screen px (converted to image units via scale).
+  const hitTestBaseline = (imgX: number, imgY: number): 'move' | 'x1' | 'x2' | null => {
+    if (!baseline) return null;
+    const handleR = 11 / scale;
+    const lineTol = 7 / scale;
+    if (Math.hypot(imgX - baseline.x1, imgY - baseline.y) <= handleR) return 'x1';
+    if (Math.hypot(imgX - baseline.x2, imgY - baseline.y) <= handleR) return 'x2';
+    const lx = Math.min(baseline.x1, baseline.x2), rx = Math.max(baseline.x1, baseline.x2);
+    if (imgX >= lx - lineTol && imgX <= rx + lineTol && Math.abs(imgY - baseline.y) <= lineTol) return 'move';
+    return null;
   };
 
   // Mouse handlers
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    // Pan: Hand tool active, or hold Space, or middle-mouse — beats every edit mode.
+    if (mode === 'pan' || spaceHeldRef.current || e.button === 1) {
+      e.preventDefault();
+      startPan(e.clientX, e.clientY);
+      return;
+    }
+
     const coords = getImageCoords(e);
 
     // FG drag mode takes priority
@@ -957,6 +1408,17 @@ export default function TemplateEditor({
       fgDragAnchorRef.current = { mouseX: coords.x, mouseY: coords.y, startX: fgOffset.x, startY: fgOffset.y };
       setIsDraggingFg(true);
       return;
+    }
+
+    // Grab an existing baseline to move (line body) or resize (endpoint) — works in
+    // any mode, so you don't have to be in Draw Baseline to nudge a placed line.
+    if (baseline) {
+      const hb = hitTestBaseline(coords.x, coords.y);
+      if (hb) {
+        baselineDragRef.current = { grabX: coords.x, grabY: coords.y, orig: { ...baseline } };
+        setDraggingBaseline(hb);
+        return;
+      }
     }
 
     // Baseline draw: mousedown sets one end + the locked Y, drag sets the other end
@@ -975,6 +1437,7 @@ export default function TemplateEditor({
         const cfg = hit === 'name' ? nameTextConfig : designationTextConfig;
         textDragOffsetRef.current = { dx: cfg.x - coords.x, dy: cfg.y - coords.y };
         setDraggingText(hit);
+        setSelectedText(hit);
         return;
       }
     }
@@ -1005,6 +1468,16 @@ export default function TemplateEditor({
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    // Pan drag scrolls the viewport.
+    if (panRef.current) {
+      const vp = scrollRef.current;
+      if (vp) {
+        vp.scrollLeft = panRef.current.left - (e.clientX - panRef.current.x);
+        vp.scrollTop = panRef.current.top - (e.clientY - panRef.current.y);
+      }
+      return;
+    }
+
     const coords = getImageCoords(e);
     // Live position readout (clamped to the canvas for sane numbers)
     setHoverPos({
@@ -1012,9 +1485,54 @@ export default function TemplateEditor({
       y: Math.max(0, Math.min(imageDimensions.height, Math.round(coords.y))),
     });
 
-    // Baseline draw: Y stays locked to the mousedown row (always horizontal)
+    // Move / resize a committed baseline (with the same edge/thirds/center snapping).
+    if (draggingBaseline && baselineDragRef.current) {
+      const { grabX, grabY, orig } = baselineDragRef.current;
+      const W = imageDimensions.width, H = imageDimensions.height;
+      const xRefs = [0, W / 3, W / 2, (2 * W) / 3, W];
+      const guides: SnapGuide[] = [];
+      let next: Baseline;
+      if (draggingBaseline === 'move') {
+        let nx1 = orig.x1 + (coords.x - grabX);
+        let nx2 = orig.x2 + (coords.x - grabX);
+        let ny = orig.y + (coords.y - grabY);
+        if (snapEnabled) {
+          const mid = (nx1 + nx2) / 2;
+          const sx = snapAxis(mid, xRefs, SNAP_THRESHOLD);
+          if (sx.ref !== null) { const shift = sx.v - mid; nx1 += shift; nx2 += shift; guides.push({ axis: 'x', position: sx.ref, label: refLabel(sx.ref, W) }); }
+          const sy = snapAxis(ny, [0, H / 3, H / 2, (2 * H) / 3, H], SNAP_THRESHOLD);
+          if (sy.ref !== null) { ny = sy.v; guides.push({ axis: 'y', position: sy.ref, label: refLabel(sy.ref, H) }); }
+        }
+        next = { x1: Math.round(nx1), x2: Math.round(nx2), y: Math.round(ny) };
+      } else {
+        // Endpoint resize: move just this end's X, keep Y and the other end.
+        let nx = coords.x;
+        if (snapEnabled) {
+          const sx = snapAxis(coords.x, xRefs, SNAP_THRESHOLD);
+          if (sx.ref !== null) { nx = sx.v; guides.push({ axis: 'x', position: sx.ref, label: refLabel(sx.ref, W) }); }
+        }
+        next = draggingBaseline === 'x1' ? { ...orig, x1: Math.round(nx) } : { ...orig, x2: Math.round(nx) };
+      }
+      next.x1 = Math.max(0, Math.min(W, next.x1));
+      next.x2 = Math.max(0, Math.min(W, next.x2));
+      next.y = Math.max(0, Math.min(H, next.y));
+      setActiveGuides(guides);
+      setBaseline(next);
+      return;
+    }
+
+    // Baseline draw: Y stays locked to the mousedown row (always horizontal).
+    // Snap the moving endpoint to edges / thirds / center for clean grounding.
     if (mode === 'baseline' && isDrawingBaseline.current) {
-      setBaselineDraft(prev => prev ? snapBaselineToEdges({ ...prev, x2: Math.round(coords.x) }) : prev);
+      let x2 = coords.x;
+      const guides: SnapGuide[] = [];
+      if (snapEnabled) {
+        const W = imageDimensions.width;
+        const s = snapAxis(coords.x, [0, W / 3, W / 2, (2 * W) / 3, W], SNAP_THRESHOLD);
+        if (s.ref !== null) { x2 = s.v; guides.push({ axis: 'x', position: s.ref, label: refLabel(s.ref, W) }); }
+      }
+      setActiveGuides(guides);
+      setBaselineDraft(prev => prev ? snapBaselineToEdges({ ...prev, x2: Math.round(x2) }) : prev);
       return;
     }
 
@@ -1082,14 +1600,44 @@ export default function TemplateEditor({
     }
 
     if (isDrawing && mode === 'draw') {
-      setDrawCurrent({ x: coords.x * scale, y: coords.y * scale });
+      // Snap the moving corner to edges / thirds / center like the other tools.
+      let cx = coords.x, cy = coords.y;
+      const guides: SnapGuide[] = [];
+      if (snapEnabled) {
+        const W = imageDimensions.width, H = imageDimensions.height;
+        const sx = snapAxis(coords.x, [0, W / 3, W / 2, (2 * W) / 3, W], SNAP_THRESHOLD);
+        const sy = snapAxis(coords.y, [0, H / 3, H / 2, (2 * H) / 3, H], SNAP_THRESHOLD);
+        if (sx.ref !== null) { cx = sx.v; guides.push({ axis: 'x', position: sx.ref, label: refLabel(sx.ref, W) }); }
+        if (sy.ref !== null) { cy = sy.v; guides.push({ axis: 'y', position: sy.ref, label: refLabel(sy.ref, H) }); }
+      }
+      setActiveGuides(guides);
+      setDrawCurrent({ x: cx * scale, y: cy * scale });
+    }
+
+    // Idle affordance: show a grab/resize cursor when hovering over a baseline.
+    if (!isDrawing) {
+      const hb = hitTestBaseline(coords.x, coords.y);
+      setBaselineHover(prev => (prev === hb ? prev : hb));
     }
   };
 
   const handleMouseUp = () => {
+    // Pan release.
+    if (panRef.current) { panRef.current = null; setIsPanning(false); return; }
+
+    // Baseline edit release — normalise so x1 stays the left endpoint, then re-snap.
+    if (draggingBaseline) {
+      setBaseline(b => b ? snapBaselineToEdges({ x1: Math.min(b.x1, b.x2), x2: Math.max(b.x1, b.x2), y: b.y }) : b);
+      setDraggingBaseline(null);
+      baselineDragRef.current = null;
+      setActiveGuides([]);
+      return;
+    }
+
     // Baseline draw: commit if the segment is long enough, else discard
     if (mode === 'baseline' && isDrawingBaseline.current) {
       isDrawingBaseline.current = false;
+      setActiveGuides([]);
       setBaselineDraft(draft => {
         if (draft && Math.abs(draft.x2 - draft.x1) > 20) {
           const lo = Math.min(draft.x1, draft.x2);
@@ -1140,6 +1688,7 @@ export default function TemplateEditor({
       }
 
       setIsDrawing(false);
+      setActiveGuides([]);
     }
   };
 
@@ -1189,6 +1738,60 @@ export default function TemplateEditor({
     }
   }, []);
 
+  // Assemble the current editor state into the config payload (shared by Save and
+  // the Test Render preview so the preview reflects exactly what would be saved).
+  const buildConfig = (): TemplateConfig => ({
+    templateId,
+    name: templateName,
+    templateType,
+    compositeMode,
+    stickerFilter,
+    pngUrl: imageUrl.split('/').pop() || '',
+    anchorMode,
+    dimensions: imageDimensions,
+    slots: slots.map(slot => ({ ...slot, anchorX: slot.anchorX, anchorY: slot.anchorY })),
+    desiredFaceRatio,
+    minZoom,
+    maxZoom,
+    showVisualGuide,
+    allowManualPositioning,
+    baseline: baseline ?? null,
+    fg_offset: fgOffset,
+    name_text: hasNameText ? nameTextConfig : undefined,
+    designation_text: hasDesignationText ? designationTextConfig : undefined,
+    luggage_card_mode: luggageCardMode,
+    print_dpi: printDpi,
+    print_width_mm: printWidthMm,
+    print_height_mm: printHeightMm,
+    output_format: outputFormat,
+  });
+
+  // Non-blocking sanity checks surfaced right before save — catches the problems
+  // that otherwise only show up as a broken/blank booth photo downstream.
+  const validateConfig = (): string[] => {
+    const w: string[] = [];
+    const W = imageDimensions.width, H = imageDimensions.height;
+    const offCanvas = (c: TextConfig) => c.x < 0 || c.x > W || c.y < 0 || c.y > H;
+    if (hasNameText && offCanvas(nameTextConfig))
+      w.push(`Name text anchor (${Math.round(nameTextConfig.x)}, ${Math.round(nameTextConfig.y)}) is outside the ${W}×${H} canvas — it may not appear.`);
+    if (hasDesignationText && offCanvas(designationTextConfig))
+      w.push(`Designation text anchor (${Math.round(designationTextConfig.x)}, ${Math.round(designationTextConfig.y)}) is outside the canvas.`);
+    if (baseline) {
+      if (baseline.y < 0 || baseline.y > H) w.push(`Baseline y=${Math.round(baseline.y)} is outside 0–${H}px.`);
+      const lo = Math.min(baseline.x1, baseline.x2), hi = Math.max(baseline.x1, baseline.x2);
+      if (lo < 0 || hi > W) w.push(`Baseline spans ${Math.round(lo)}–${Math.round(hi)}px, outside 0–${W}px.`);
+    }
+    if (compositeMode === 'overlay' && pngTransparentPct != null && pngTransparentPct >= 0 && pngTransparentPct < 2)
+      w.push(`Composite mode is “Overlay” but the template is only ~${pngTransparentPct.toFixed(0)}% transparent (a solid card) — the person will be hidden behind it. Switch to “Background”.`);
+    const fontMissing = (c: TextConfig, label: string) => {
+      if (c.fontName && !fonts.some(f => f.name === c.fontName))
+        w.push(`${label} font “${c.fontName}” isn’t on the server — it’ll fall back to a default font.`);
+    };
+    if (hasNameText) fontMissing(nameTextConfig, 'Name');
+    if (hasDesignationText) fontMissing(designationTextConfig, 'Designation');
+    return w;
+  };
+
   // Save configuration
   const handleSave = () => {
     // Sticker templates place the subject via a slot OR a baseline. Only block the
@@ -1198,39 +1801,139 @@ export default function TemplateEditor({
       alert('Draw a Slot, or a Baseline, so the photo has somewhere to go.');
       return;
     }
-
-    const config: TemplateConfig = {
-      templateId,
-      name: templateName,
-      templateType,
-      compositeMode,
-      stickerFilter,
-      pngUrl: imageUrl.split('/').pop() || '',
-      anchorMode,
-      dimensions: imageDimensions,
-      slots: slots.map(slot => ({
-        ...slot,
-        anchorX: slot.anchorX,
-        anchorY: slot.anchorY,
-      })),
-      desiredFaceRatio,
-      minZoom,
-      maxZoom,
-      showVisualGuide,
-      allowManualPositioning,
-      baseline: baseline ?? null,
-      fg_offset: fgOffset,
-      name_text: hasNameText ? nameTextConfig : undefined,
-      designation_text: hasDesignationText ? designationTextConfig : undefined,
-      luggage_card_mode: luggageCardMode,
-      print_dpi: printDpi,
-      print_width_mm: printWidthMm,
-      print_height_mm: printHeightMm,
-      output_format: outputFormat,
-    };
-
-    onSave(config);
+    const warnings = validateConfig();
+    if (warnings.length > 0) {
+      const ok = window.confirm(
+        'Heads up before saving:\n\n• ' + warnings.join('\n\n• ') + '\n\nSave anyway?'
+      );
+      if (!ok) return;
+    }
+    onSave(buildConfig());
   };
+
+  // Test Render: POST the current (unsaved) config + a sample cutout to the backend
+  // and show exactly what the booth would produce — closes the edit→verify loop.
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  const handleTestRender = async () => {
+    setPreviewLoading(true);
+    setPreviewError(null);
+    setPreviewUrl(prev => { if (prev) URL.revokeObjectURL(prev); return null; });
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/templates/preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildConfig()),
+      });
+      if (!res.ok) {
+        const msg = await res.text().catch(() => '');
+        throw new Error(msg || `Preview failed (${res.status})`);
+      }
+      const blob = await res.blob();
+      setPreviewUrl(URL.createObjectURL(blob));
+    } catch (e) {
+      setPreviewError(e instanceof Error ? e.message : 'Preview failed');
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  // ---- Undo / redo -------------------------------------------------------
+  // A debounced history of the editable state. A continuous drag records one
+  // entry (the state before it), so undo steps feel natural rather than pixel-wise.
+  const histRef = useRef<{ past: string[]; future: string[] }>({ past: [], future: [] });
+  const lastSnapRef = useRef<string>('');           // last committed snapshot
+  const restoringRef = useRef(false);
+  const histTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [histTick, setHistTick] = useState(0);      // forces button re-render
+
+  const liveSnapshot = JSON.stringify({
+    slots, baseline, anchorMode, compositeMode, templateType, stickerFilter,
+    hasNameText, nameTextConfig, hasDesignationText, designationTextConfig,
+    fgOffset, imageDimensions, luggageCardMode, printDpi, printWidthMm, printHeightMm,
+    allowManualPositioning, showVisualGuide, desiredFaceRatio, minZoom, maxZoom, outputFormat,
+  });
+
+  const applySnapshot = (json: string) => {
+    const s = JSON.parse(json);
+    restoringRef.current = true;
+    setSlots(s.slots); setBaseline(s.baseline); setAnchorMode(s.anchorMode);
+    setCompositeMode(s.compositeMode); setTemplateType(s.templateType); setStickerFilter(s.stickerFilter);
+    setHasNameText(s.hasNameText); setNameTextConfig(s.nameTextConfig);
+    setHasDesignationText(s.hasDesignationText); setDesignationTextConfig(s.designationTextConfig);
+    setFgOffset(s.fgOffset); setImageDimensions(s.imageDimensions); setLuggageCardMode(s.luggageCardMode);
+    setPrintDpi(s.printDpi); setPrintWidthMm(s.printWidthMm); setPrintHeightMm(s.printHeightMm);
+    setAllowManualPositioning(s.allowManualPositioning); setShowVisualGuide(s.showVisualGuide);
+    setDesiredFaceRatio(s.desiredFaceRatio); setMinZoom(s.minZoom); setMaxZoom(s.maxZoom);
+    setOutputFormat(s.outputFormat);
+    lastSnapRef.current = json;
+    setTimeout(() => { restoringRef.current = false; }, 0);
+  };
+
+  // Commit a pending debounced change immediately (so undo captures it).
+  const flushHistory = () => {
+    if (histTimerRef.current) { clearTimeout(histTimerRef.current); histTimerRef.current = null; }
+    if (lastSnapRef.current && liveSnapshot !== lastSnapRef.current) {
+      histRef.current.past.push(lastSnapRef.current);
+      histRef.current.future = [];
+      lastSnapRef.current = liveSnapshot;
+    }
+  };
+
+  const undo = () => {
+    flushHistory();
+    const h = histRef.current;
+    if (h.past.length === 0) return;
+    const prev = h.past.pop()!;
+    h.future.push(liveSnapshot);
+    applySnapshot(prev);
+    setHistTick(t => t + 1);
+  };
+  const redo = () => {
+    const h = histRef.current;
+    if (h.future.length === 0) return;
+    const next = h.future.pop()!;
+    h.past.push(liveSnapshot);
+    applySnapshot(next);
+    setHistTick(t => t + 1);
+  };
+  const undoRef = useRef(undo); undoRef.current = undo;
+  const redoRef = useRef(redo); redoRef.current = redo;
+
+  // Observer: seed once, then debounce-record history as the state diverges.
+  useEffect(() => {
+    if (!configLoaded) return;
+    if (!lastSnapRef.current) { lastSnapRef.current = liveSnapshot; return; }
+    if (liveSnapshot === lastSnapRef.current) return;
+    if (restoringRef.current) { lastSnapRef.current = liveSnapshot; return; }
+    const prev = lastSnapRef.current;
+    if (histTimerRef.current) clearTimeout(histTimerRef.current);
+    histTimerRef.current = setTimeout(() => {
+      histRef.current.past.push(prev);
+      if (histRef.current.past.length > 100) histRef.current.past.shift();
+      histRef.current.future = [];
+      lastSnapRef.current = liveSnapshot;
+      histTimerRef.current = null;
+      setHistTick(t => t + 1);
+    }, 400);
+  });
+
+  // Ctrl/⌘+Z undo · Ctrl+Shift+Z / Ctrl+Y redo (ignored while typing).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isEditableTarget(e.target) || !(e.ctrlKey || e.metaKey)) return;
+      const k = e.key.toLowerCase();
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); undoRef.current(); }
+      else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); redoRef.current(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const canUndo = histTick >= 0 && histRef.current.past.length > 0;
+  const canRedo = histTick >= 0 && histRef.current.future.length > 0;
 
   return (
     <div className={styles.editorContainer}>
@@ -1240,28 +1943,61 @@ export default function TemplateEditor({
           <button className={styles.cancelButton} onClick={onCancel}>
             Cancel
           </button>
+          <button
+            className={styles.cancelButton}
+            onClick={() => undoRef.current()}
+            disabled={!canUndo}
+            title="Undo (Ctrl+Z)"
+            style={{ opacity: canUndo ? 1 : 0.4 }}
+          >
+            ↶ Undo
+          </button>
+          <button
+            className={styles.cancelButton}
+            onClick={() => redoRef.current()}
+            disabled={!canRedo}
+            title="Redo (Ctrl+Shift+Z)"
+            style={{ opacity: canRedo ? 1 : 0.4 }}
+          >
+            ↷ Redo
+          </button>
+          <button
+            className={styles.cancelButton}
+            onClick={handleTestRender}
+            disabled={previewLoading}
+            title="Render the current (unsaved) settings with a sample person — see exactly what the booth would produce"
+            style={{ opacity: previewLoading ? 0.6 : 1 }}
+          >
+            {previewLoading ? '⏳ Rendering…' : '🧪 Test Render'}
+          </button>
           <button className={styles.saveButton} onClick={handleSave}>
             💾 Save Configuration
           </button>
         </div>
       </div>
 
-      <div className={styles.editorBody}>
-        {/* Toolbar */}
-        <div className={styles.toolbar}>
+      {/* Toolbar — docked bar directly below the header */}
+      <div className={styles.toolbar}>
           <div className={styles.toolGroup}>
             <span className={styles.toolLabel}>Mode:</span>
-            <button 
+            <button
               className={`${styles.toolButton} ${mode === 'select' ? styles.active : ''}`}
               onClick={() => setMode('select')}
-              title="Select slot"
+              title="Select slot  (V)"
             >
               👆 Select
+            </button>
+            <button
+              className={`${styles.toolButton} ${mode === 'pan' ? styles.active : ''}`}
+              onClick={() => setMode('pan')}
+              title="Hand tool: drag to move the canvas around when zoomed in — or hold Space in any mode  (H)"
+            >
+              ✋ Pan
             </button>
             <button 
               className={`${styles.toolButton} ${mode === 'draw' ? styles.active : ''}`}
               onClick={() => setMode('draw')}
-              title="Draw new slot"
+              title="Draw new slot  (D)"
             >
               ✏️ Draw Slot
             </button>
@@ -1276,7 +2012,7 @@ export default function TemplateEditor({
             <button
               className={`${styles.toolButton} ${mode === 'baseline' ? styles.active : ''}`}
               onClick={() => setMode('baseline')}
-              title="Draw the baseline: the subject's bottom sits on this line, centered on its midpoint, scaled to its length"
+              title="Draw the baseline: the subject's bottom sits on this line, centered on its midpoint, scaled to its length  (B)"
             >
               📏 Draw Baseline
             </button>
@@ -1343,8 +2079,9 @@ export default function TemplateEditor({
               Clear All
             </button>
           </div>
-        </div>
+      </div>
 
+      <div className={styles.editorBody}>
         {/* Canvas area */}
         <div className={styles.canvasContainer} ref={containerRef}>
           {(!imageLoaded || !configLoaded) && !imageError && (
@@ -1357,21 +2094,52 @@ export default function TemplateEditor({
               {imageError}
             </div>
           )}
-          <canvas
-            ref={canvasRef}
-            className={styles.canvas}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={() => { handleMouseUp(); setHoverPos(null); }}
-            style={{ cursor: draggingText ? 'grabbing' : mode === 'fg' ? (isDraggingFg ? 'grabbing' : 'grab') : mode === 'draw' || mode === 'baseline' ? 'crosshair' : mode === 'anchor' ? 'pointer' : 'default' }}
-          />
+
+          {/* Numbered ruler gutters — track zoom + scroll (mm in Luggage Card mode, else px) */}
+          <div className={styles.rulerCorner}>{luggageCardMode ? 'mm' : 'px'}</div>
+          <canvas ref={topRulerRef} className={styles.rulerTop} />
+          <canvas ref={leftRulerRef} className={styles.rulerLeft} />
+
+          {/* Scrollable, zoomable viewport (Ctrl+wheel = zoom, Space/middle-drag = pan) */}
+          <div className={styles.canvasScroll} ref={scrollRef}>
+            <canvas
+              ref={canvasRef}
+              className={styles.canvas}
+              style={{
+                width: cssW, height: cssH,
+                cursor: isPanning ? 'grabbing'
+                  : (mode === 'pan' || spaceHeldRef.current) ? 'grab'
+                  : draggingBaseline === 'move' ? 'grabbing'
+                  : draggingBaseline ? 'ew-resize'
+                  : baselineHover === 'move' ? 'grab'
+                  : baselineHover ? 'ew-resize'
+                  : draggingText ? 'grabbing'
+                  : mode === 'fg' ? (isDraggingFg ? 'grabbing' : 'grab')
+                  : (mode === 'draw' || mode === 'baseline') ? 'crosshair'
+                  : mode === 'anchor' ? 'pointer' : 'default',
+              }}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={() => { handleMouseUp(); setHoverPos(null); }}
+              onDoubleClick={() => setZoom(1)}
+            />
+          </div>
+
+          {/* Zoom controls */}
+          <div className={styles.zoomBar}>
+            <button onClick={() => setZoom(1)} title="Fit the whole card in view">Fit</button>
+            <button onClick={() => zoomAt(1 / (navRef.current.fitScale || 1))} title="Actual pixels (100%)">1:1</button>
+            <button onClick={() => zoomAt(navRef.current.zoom / 1.25)} title="Zoom out (Ctrl −)">−</button>
+            <span className={styles.zoomPct}>{Math.round(scale * 100)}%</span>
+            <button onClick={() => zoomAt(navRef.current.zoom * 1.25)} title="Zoom in (Ctrl +)">+</button>
+          </div>
 
           {/* Live position readout — tells you exactly what coordinates you're at */}
           {hoverPos && imageLoaded && (
             <div
               style={{
-                position: 'absolute', top: 8, right: 8, zIndex: 5,
+                position: 'absolute', top: RULER + 8, right: 8, zIndex: 6,
                 background: 'rgba(0,0,0,0.72)', color: '#e5e7eb',
                 font: '600 12px/1.4 monospace', padding: '5px 9px', borderRadius: 6,
                 pointerEvents: 'none', letterSpacing: '0.02em',
@@ -1387,22 +2155,42 @@ export default function TemplateEditor({
             </div>
           )}
 
-          {/* Instructions overlay */}
-          <div className={styles.instructions}>
-            {mode === 'draw' && '🖱️ Drag to draw a slot rectangle'}
-            {mode === 'anchor' && selectedSlotIndex !== null && '🎯 Click inside the slot to set face anchor point'}
-            {mode === 'select' && '👆 Click on a slot to select it'}
-            {mode === 'baseline' && '📏 Drag a horizontal line where the subject should stand — bottom sits on it, width = its length. Snaps flush to template edges.'}
-            {mode === 'fg' && `📐 Drag to reposition FG overlay — cyan guides snap to center, edges & thirds  (offset: ${fgOffset.x}, ${fgOffset.y})`}
-          </div>
+          {/* Instructions overlay — dismissable so it stops covering the card */}
+          {(() => {
+            const hint =
+              mode === 'draw' ? '🖱️ Drag to draw a slot rectangle · magenta guides snap to edges/thirds/center'
+              : mode === 'anchor' && selectedSlotIndex !== null ? '🎯 Click inside the slot to set face anchor point'
+              : mode === 'select' ? '👆 Click a slot to select · keys: V select · H pan · D slot · B baseline · Esc deselect · Ctrl+wheel zoom'
+              : mode === 'baseline' ? '📏 Drag to draw a baseline · grab the line to move / its ends to resize · ↑↓←→ nudge (Shift =10px) · snaps to edges/thirds/center'
+              : mode === 'fg' ? `📐 Drag to reposition FG overlay — cyan guides snap to center, edges & thirds  (offset: ${fgOffset.x}, ${fgOffset.y})`
+              : mode === 'pan' ? '✋ Drag anywhere to move the canvas around · Ctrl+wheel to zoom · switch to another tool to edit'
+              : '';
+            if (!hint || !showInstructions) return null;
+            return (
+              <div className={styles.instructions}>
+                <span>{hint}</span>
+                <button
+                  className={styles.instructionsClose}
+                  onClick={() => setShowInstructions(false)}
+                  title="Dismiss (reappears when you switch tools)"
+                  aria-label="Dismiss instructions"
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Settings panel */}
         <div className={styles.settingsPanel}>
           <h3 className={styles.settingsTitle}>Template Settings</h3>
+
+          <details className={styles.section} open>
+            <summary className={styles.sectionSummary}>Print &amp; Output</summary>
           
-          {/* Luggage Card Printing Mode */}
-          <div className={styles.settingRow} style={{ background: 'rgba(251,191,36,0.08)', borderRadius: 8, padding: '10px 12px', marginBottom: 8 }}>
+          {/* Luggage Card Printing Mode (the section itself is the frame now) */}
+          <div className={styles.settingRow} style={{ marginBottom: 0 }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600 }}>
               <input
                 type="checkbox"
@@ -1429,36 +2217,55 @@ export default function TemplateEditor({
                   <label>Card size (mm):</label>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                     <input type="number" value={printWidthMm} step="0.1"
+                      onFocus={() => { cardResizeAnchorRef.current = { ...imageDimensions }; }}
                       onChange={e => {
                         const v = parseFloat(e.target.value) || 86;
                         setPrintWidthMm(v);
                         setImageDimensions(prev => ({ ...prev, width: Math.round(v / 25.4 * printDpi) }));
                       }}
+                      onBlur={() => {
+                        const a = cardResizeAnchorRef.current;
+                        if (a && a.width > 0) rescaleOverlays(imageDimensions.width / a.width, 1);
+                        cardResizeAnchorRef.current = null;
+                      }}
                       style={{ width: 56 }} />
                     <span>×</span>
                     <input type="number" value={printHeightMm} step="0.1"
+                      onFocus={() => { cardResizeAnchorRef.current = { ...imageDimensions }; }}
                       onChange={e => {
                         const v = parseFloat(e.target.value) || 54;
                         setPrintHeightMm(v);
                         setImageDimensions(prev => ({ ...prev, height: Math.round(v / 25.4 * printDpi) }));
                       }}
+                      onBlur={() => {
+                        const a = cardResizeAnchorRef.current;
+                        if (a && a.height > 0) rescaleOverlays(1, imageDimensions.height / a.height);
+                        cardResizeAnchorRef.current = null;
+                      }}
                       style={{ width: 56 }} />
                     <span>mm</span>
                     <button className={styles.toolButton} style={{ fontSize: '0.75rem' }}
-                      onClick={() => { setPrintWidthMm(86); setPrintHeightMm(54); setImageDimensions({ width: Math.round(86 / 25.4 * printDpi), height: Math.round(54 / 25.4 * printDpi) }); }}>
+                      onClick={() => {
+                        const oldW = imageDimensions.width, oldH = imageDimensions.height;
+                        const newW = Math.round(86 / 25.4 * printDpi), newH = Math.round(54 / 25.4 * printDpi);
+                        setPrintWidthMm(86); setPrintHeightMm(54);
+                        setImageDimensions({ width: newW, height: newH });
+                        if (oldW > 0 && oldH > 0) rescaleOverlays(newW / oldW, newH / oldH);
+                      }}>
                       CR80
                     </button>
                     <button className={styles.toolButton} style={{ fontSize: '1rem', padding: '2px 6px' }}
                       title="Swap portrait / landscape"
                       onClick={() => {
-                        const newW = printHeightMm;
-                        const newH = printWidthMm;
-                        setPrintWidthMm(newW);
-                        setPrintHeightMm(newH);
-                        setImageDimensions({
-                          width: Math.round(newW / 25.4 * printDpi),
-                          height: Math.round(newH / 25.4 * printDpi),
-                        });
+                        const oldW = imageDimensions.width, oldH = imageDimensions.height;
+                        const newWmm = printHeightMm;
+                        const newHmm = printWidthMm;
+                        const newW = Math.round(newWmm / 25.4 * printDpi);
+                        const newH = Math.round(newHmm / 25.4 * printDpi);
+                        setPrintWidthMm(newWmm);
+                        setPrintHeightMm(newHmm);
+                        setImageDimensions({ width: newW, height: newH });
+                        if (oldW > 0 && oldH > 0) rescaleOverlays(newW / oldW, newH / oldH);
                       }}>
                       ↻
                     </button>
@@ -1480,6 +2287,9 @@ export default function TemplateEditor({
                             setNameTextConfig(p => ({ ...p, x: Math.round(p.x * factor), y: Math.round(p.y * factor), fontSize: Math.round(p.fontSize * factor), maxWidth: p.maxWidth ? Math.round(p.maxWidth * factor) : 0 }));
                             setDesignationTextConfig(p => ({ ...p, x: Math.round(p.x * factor), y: Math.round(p.y * factor), fontSize: Math.round(p.fontSize * factor), maxWidth: p.maxWidth ? Math.round(p.maxWidth * factor) : 0 }));
                             setSlots(prev => prev.map(s => ({ ...s, x: Math.round(s.x * factor), y: Math.round(s.y * factor), width: Math.round(s.width * factor), height: Math.round(s.height * factor) })));
+                            // Baseline + FG offset are also canvas-pixel coords — scale them too, else they jump.
+                            setBaseline(prev => prev ? { x1: Math.round(prev.x1 * factor), x2: Math.round(prev.x2 * factor), y: Math.round(prev.y * factor) } : prev);
+                            setFgOffset(prev => ({ x: Math.round(prev.x * factor), y: Math.round(prev.y * factor) }));
                           }} />
                         {d} DPI
                       </label>
@@ -1506,7 +2316,10 @@ export default function TemplateEditor({
               </div>
             )}
           </div>
+          </details>
 
+          <details className={styles.section}>
+            <summary className={styles.sectionSummary}>Template &amp; Compositing</summary>
           <div className={styles.settingRow}>
             <label>Template Type:</label>
             <select value={templateType} onChange={e => setTemplateType(e.target.value as typeof templateType)}>
@@ -1554,9 +2367,11 @@ export default function TemplateEditor({
               </span>
             </div>
           )}
+          </details>
 
           {/* Text Overlays — available for all template types */}
-          <h3 className={styles.settingsTitle} style={{ marginTop: '1rem' }}>Text Overlays</h3>
+          <details className={styles.section} open>
+            <summary className={styles.sectionSummary}>Text Overlays</summary>
           <p className={styles.hint} style={{ marginBottom: 8 }}>
             The dashed box shows the real text — font, size, colour, alignment & rotation.
             Drag the box to position it; the round handle is the anchor point.
@@ -1744,7 +2559,10 @@ export default function TemplateEditor({
               </>
             );
           })()}
-          
+          </details>
+
+          <details className={styles.section}>
+            <summary className={styles.sectionSummary}>Placement &amp; Options</summary>
           <div className={styles.settingRow}>
             <label>Image Filter:</label>
             <select value={stickerFilter} onChange={e => setStickerFilter(e.target.value as typeof stickerFilter)}>
@@ -1766,13 +2584,39 @@ export default function TemplateEditor({
           </div>
 
           {anchorMode === 'baseline' && (
-            <div className={styles.settingRow} style={{ background: 'rgba(34,211,238,0.1)', borderRadius: 6, padding: '8px 10px' }}>
+            <div className={styles.settingRow} style={{ background: 'rgba(34,211,238,0.1)', borderRadius: 6, padding: '8px 10px', flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
               <span style={{ fontSize: '0.78rem', color: '#67e8f9' }}>
                 📏 Robust placement: the cutout is auto-scaled & grounded on the baseline (no face detection).
                 {baseline
-                  ? ` Baseline set: width ${Math.abs(baseline.x2 - baseline.x1)}px at y=${baseline.y}. Use “Draw Baseline” to redraw.`
+                  ? ' Type exact values below, drag the line, or select “Draw Baseline” and nudge with ↑/↓/←/→ (Shift = 10px).'
                   : ' Click “Draw Baseline” above, then drag a horizontal line where the subject should stand.'}
               </span>
+              {baseline && (() => {
+                const pxToMm = luggageCardMode ? 25.4 / printDpi : 0;
+                const mm = (px: number) => pxToMm ? ` (${(px * pxToMm).toFixed(1)}mm)` : '';
+                const clamp = (v: number, hi: number) => Math.max(0, Math.min(hi, Math.round(v)));
+                const numStyle = { width: 68, marginLeft: 4, background: '#0b1220', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 4, padding: '2px 5px' } as const;
+                const lblStyle = { fontSize: '0.72rem', color: '#a5f3fc', display: 'inline-flex', alignItems: 'center' } as const;
+                return (
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <label style={lblStyle}>y
+                      <input type="number" value={Math.round(baseline.y)} style={numStyle}
+                        onChange={e => setBaseline(b => b ? { ...b, y: clamp(parseFloat(e.target.value) || 0, imageDimensions.height) } : b)} />
+                    </label>
+                    <label style={lblStyle}>x1
+                      <input type="number" value={Math.round(baseline.x1)} style={numStyle}
+                        onChange={e => setBaseline(b => b ? { ...b, x1: clamp(parseFloat(e.target.value) || 0, imageDimensions.width) } : b)} />
+                    </label>
+                    <label style={lblStyle}>x2
+                      <input type="number" value={Math.round(baseline.x2)} style={numStyle}
+                        onChange={e => setBaseline(b => b ? { ...b, x2: clamp(parseFloat(e.target.value) || 0, imageDimensions.width) } : b)} />
+                    </label>
+                    <span style={{ fontSize: '0.72rem', color: '#64748b' }}>
+                      width {Math.abs(baseline.x2 - baseline.x1)}px{mm(Math.abs(baseline.x2 - baseline.x1))} · y{mm(baseline.y)}
+                    </span>
+                  </div>
+                );
+              })()}
             </div>
           )}
           
@@ -1841,9 +2685,10 @@ export default function TemplateEditor({
               />
             </div>
           </div>
+          </details>
 
-          {/* Slot list */}
-          <h3 className={styles.settingsTitle}>Slots ({slots.length})</h3>
+          <details className={styles.section} open>
+            <summary className={styles.sectionSummary}>Slots ({slots.length})</summary>
           <div className={styles.slotList}>
             {slots.map((slot, index) => (
               <div 
@@ -1866,8 +2711,34 @@ export default function TemplateEditor({
               </div>
             )}
           </div>
+          </details>
         </div>
       </div>
+
+      {(previewUrl || previewLoading || previewError) && (
+        <div
+          onClick={() => { setPreviewUrl(prev => { if (prev) URL.revokeObjectURL(prev); return null; }); setPreviewError(null); }}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.72)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 24 }}
+        >
+          <div onClick={e => e.stopPropagation()} style={{ background: '#0f172a', border: '1px solid #334155', borderRadius: 10, padding: 16, maxWidth: '92vw', maxHeight: '92vh', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+              <strong style={{ color: '#e2e8f0' }}>🧪 Test Render — what the booth would produce</strong>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className={styles.toolButton} onClick={handleTestRender} disabled={previewLoading} title="Re-render with the latest settings">↻ Re-render</button>
+                <button className={styles.toolButton} onClick={() => { setPreviewUrl(prev => { if (prev) URL.revokeObjectURL(prev); return null; }); setPreviewError(null); }}>✕ Close</button>
+              </div>
+            </div>
+            {previewLoading && <div style={{ color: '#94a3b8', padding: 40, textAlign: 'center' }}>Rendering…</div>}
+            {previewError && <div style={{ color: '#fca5a5', padding: 20, maxWidth: 480 }}>Render failed: {previewError}</div>}
+            {previewUrl && !previewLoading && (
+              <img src={previewUrl} alt="Test render preview" style={{ maxWidth: '86vw', maxHeight: '74vh', objectFit: 'contain', background: '#020617', borderRadius: 6 }} />
+            )}
+            <p style={{ color: '#64748b', fontSize: '0.72rem', margin: 0 }}>
+              The sample person is a placeholder — this verifies placement, scaling &amp; text, not the actual photo.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

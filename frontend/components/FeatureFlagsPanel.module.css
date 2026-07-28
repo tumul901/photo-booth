@@ -202,6 +202,26 @@
   background: #10b981;
 }
 
+/* Shown when a cloud profile is available but FAL_KEY is missing */
+.cloudWarning {
+  margin: 0 0 1rem 0;
+  padding: 0.7rem 0.9rem;
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  border-radius: 0.5rem;
+  color: #fcd34d;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.cloudWarning code {
+  background: rgba(15, 23, 42, 0.8);
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  color: #fde68a;
+}
+
 /* Stroke color picker */
 .colorPickerRow {
   margin-top: 1rem;

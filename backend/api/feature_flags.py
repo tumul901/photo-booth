@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Any
 
+from services.cloud_rembg import is_configured as cloud_rembg_configured
 from services.feature_flags_service import (
     get_flags,
     save_flags,
@@ -46,6 +47,9 @@ async def admin_get_flags():
         "flags": get_flags(),
         "available_rembg_profiles": list(PROFILES_NAMES),
         "available_sticker_effects": list(STICKER_EFFECT_NAMES),
+        # False means a cloud_birefnet_* profile would silently run local — the
+        # panel warns instead of leaving the operator guessing.
+        "cloud_rembg_configured": cloud_rembg_configured(),
     }
 
 

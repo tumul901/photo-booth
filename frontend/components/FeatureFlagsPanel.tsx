@@ -5,7 +5,8 @@
  * =================
  * Flat list of feature toggles:
  *  - One on/off switch per booth mode (frame, sticker, word_template, magazine)
- *  - Radio for the rembg model profile (isnet_hi vs silueta_hi) for A/B comparison
+ *  - Radio for the rembg model profile — local models and the fal.ai cloud
+ *    BiRefNet variants — for A/B comparison
  *
  * Writes go to PUT /api/admin/feature-flags. The booth reads them on every load,
  * so changes take effect on the next session — no restart.
@@ -39,8 +40,8 @@ const MODE_LABELS: Array<{ key: Mode; label: string; hint: string }> = [
 
 const PROFILE_DETAIL: Record<string, { label: string; desc: string }> = {
   human_hi: {
-    label: 'human_hi (recommended)',
-    desc: 'u2net_human_seg — human-specialized. Cleanest body silhouette on busy/low-contrast backgrounds and the fastest (~0.5 s). Best default for a people booth.',
+    label: 'human_hi (local — safe fallback)',
+    desc: 'u2net_human_seg on this machine. No internet needed and the fastest (~0.5 s), but coarser hair and edges than the cloud models. Switch here to run fully offline, or if a cloud profile ever misbehaves mid-event.',
   },
   isnet_hi: {
     label: 'isnet_hi',
@@ -49,6 +50,18 @@ const PROFILE_DETAIL: Record<string, { label: string; desc: string }> = {
   silueta_hi: {
     label: 'silueta_hi',
     desc: 'silueta at 1600 px. Faster, coarser edges. Good for full-body where edges matter less.',
+  },
+  cloud_birefnet_portrait: {
+    label: '☁ BiRefNet Portrait (fal.ai)',
+    desc: 'GPU BiRefNet tuned for portraits — a generation ahead of the local models on hair and fine edges. ~2–4 s per cutout, well under ₹1. Falls back to human_hi automatically if fal.ai is unreachable.',
+  },
+  cloud_birefnet_matting: {
+    label: '☁ BiRefNet Matting (fal.ai) — recommended',
+    desc: 'GPU BiRefNet trained on human matting data — the best all-rounder for a people booth, and the most forgiving when guests hold props or crowd the frame. ~2–4 s per cutout. Falls back to human_hi automatically if fal.ai is unreachable.',
+  },
+  cloud_birefnet_general: {
+    label: '☁ BiRefNet General, Heavy (fal.ai)',
+    desc: 'GPU BiRefNet general-purpose heavy variant. Most robust when the shot is not a clean portrait — props, several people, odd framing.',
   },
 };
 
@@ -79,6 +92,8 @@ export default function FeatureFlagsPanel({ apiBaseUrl }: FeatureFlagsPanelProps
   const [flags, setFlags] = useState<Flags | null>(null);
   const [profiles, setProfiles] = useState<string[]>([]);
   const [effects, setEffects] = useState<string[]>([]);
+  // Assume configured until the API says otherwise, so the warning never flashes on load.
+  const [cloudConfigured, setCloudConfigured] = useState(true);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -97,6 +112,7 @@ export default function FeatureFlagsPanel({ apiBaseUrl }: FeatureFlagsPanelProps
         setFlags(data.flags);
         setProfiles(data.available_rembg_profiles || []);
         setEffects(data.available_sticker_effects || []);
+        setCloudConfigured(data.cloud_rembg_configured !== false);
         setError(null);
       })
       .catch((e) => {
@@ -220,8 +236,16 @@ export default function FeatureFlagsPanel({ apiBaseUrl }: FeatureFlagsPanelProps
       <section className={styles.section}>
         <h3 className={styles.sectionTitle}>Background Removal Profile</h3>
         <p className={styles.sectionHint}>
-          Swap models live for A/B comparison. Watch <code>PERF [rembg]</code> and <code>QUAL [rembg]</code> in backend logs to compare timing + edge metrics.
+          Swap models live for A/B comparison. Watch <code>PERF [rembg]</code> and <code>QUAL [rembg]</code> in backend logs to compare timing + edge metrics — the{' '}
+          <code>source=</code> field says whether a ☁ cloud profile actually reached fal.ai or fell back to local.
         </p>
+        {!cloudConfigured && (
+          <p className={styles.cloudWarning}>
+            ⚠️ No <code>FAL_KEY</code> configured — the ☁ cloud profiles below will fall back to{' '}
+            <strong>human_hi</strong> on every photo. Add <code>FAL_KEY</code> to <code>backend/.env</code>{' '}
+            and restart the backend to enable them.
+          </p>
+        )}
         <div className={styles.list}>
           {profiles.map((name) => {
             const detail = PROFILE_DETAIL[name] || { label: name, desc: '' };

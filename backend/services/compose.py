@@ -173,18 +173,47 @@ class TemplateMetadata:
     output_format: str = "jpeg"       # "png" | "jpeg_print" | "jpeg" (luggage card overrides to PNG or q95 JPEG)
 
 def clear_template_cache():
-    """Clear in-memory caches when templates are updated."""
-    load_template_metadata.cache_clear()
+    """Clear in-memory caches when templates are updated. (Metadata also self-
+    invalidates via file mtime, but we clear it here too for an immediate refresh
+    and to drop the image caches.)"""
+    _load_template_metadata_cached.cache_clear()
     _load_template_image.cache_clear()
     _get_resized_template.cache_clear()
 
-@lru_cache(maxsize=32)
+def _resolve_template_json(template_id: str, templates_dir: str) -> Optional[str]:
+    """Case-insensitively resolve a template_id to its JSON path (or None)."""
+    def ci(name: str) -> Optional[str]:
+        if not templates_dir or not os.path.exists(templates_dir):
+            return None
+        low = name.lower()
+        for entry in os.listdir(templates_dir):
+            if entry.lower() == low:
+                return os.path.join(templates_dir, entry)
+        return None
+    return ci(f"{template_id}.json") or ci(os.path.basename(template_id) + ".json")
+
+
 def load_template_metadata(template_id: str, templates_dir: Optional[str] = None) -> Optional[TemplateMetadata]:
-    """Load template metadata from JSON file."""
+    """
+    Load template metadata, cached per JSON file mtime. Because the mtime is part
+    of the cache key, an edited or redeployed template JSON is picked up
+    automatically — no explicit cache clear needed, and it's correct even across
+    multiple uvicorn workers (each worker re-reads when the file changes).
+    """
     if templates_dir is None:
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
         templates_dir = os.path.join(project_root, "templates")
-    
+    jp = _resolve_template_json(template_id, templates_dir)
+    try:
+        mtime = os.path.getmtime(jp) if jp else 0.0
+    except OSError:
+        mtime = 0.0
+    return _load_template_metadata_cached(template_id, templates_dir, mtime)
+
+
+@lru_cache(maxsize=64)
+def _load_template_metadata_cached(template_id: str, templates_dir: str, mtime: float) -> Optional[TemplateMetadata]:
+    """Cached parse. `mtime` is only a cache-key component (invalidates on change)."""
     # Case-insensitive lookup helper
     def find_file_case_insensitive(directory, target_name):
         if not os.path.exists(directory):
@@ -322,6 +351,95 @@ def load_template_metadata(template_id: str, templates_dir: Optional[str] = None
         except Exception as e:
             print(f"Error parse template {json_path}: {e}")
     return None
+
+
+def build_metadata_from_config(data: dict, templates_dir: str) -> Optional[TemplateMetadata]:
+    """
+    Build a TemplateMetadata from an on-disk-shaped config dict WITHOUT reading the
+    JSON from disk. Lets the admin editor render an UNSAVED config for preview.
+    Expects the same dict shape the save endpoint writes (anchor.targetX, camelCase
+    text keys, dimensions{}), so it stays in step with load_template_metadata.
+    """
+    try:
+        slots = []
+        for slot_data in data.get("slots", []):
+            anchor = slot_data.get("anchorTarget", slot_data.get("anchor", {})) or {}
+            slots.append(SlotMetadata(
+                slot_id=slot_data.get("id", slot_data.get("slotId", "main")),
+                x=slot_data["x"], y=slot_data["y"],
+                width=slot_data["width"], height=slot_data["height"],
+                anchor_target_x=anchor.get("x", anchor.get("targetX")),
+                anchor_target_y=anchor.get("y", anchor.get("targetY")),
+                z_index=slot_data.get("zIndex", 0),
+                desired_face_ratio=slot_data.get("desiredFaceRatio"),
+                min_zoom=slot_data.get("minZoom", 0.5),
+                max_zoom=slot_data.get("maxZoom", 3.0),
+            ))
+
+        dims = data.get("dimensions", {})
+        w = int(dims.get("width", data.get("width", 1200)))
+        h = int(dims.get("height", data.get("height", 1600)))
+
+        png_url = data.get("png_path", data.get("pngUrl", "")) or ""
+        # Resolve case-insensitively so a Linux VPS still finds the PNG.
+        if png_url and templates_dir and os.path.exists(templates_dir):
+            if not os.path.exists(os.path.join(templates_dir, png_url)):
+                for entry in os.listdir(templates_dir):
+                    if entry.lower() == png_url.lower():
+                        png_url = entry
+                        break
+
+        def _txt(raw: dict) -> Optional[MagazineTextConfig]:
+            if not raw:
+                return None
+            font_path = raw.get("fontPath", "")
+            font_name = raw.get("fontName", "")
+            if font_name and not font_path:
+                try:
+                    from utils.wtm_utils import find_font_path
+                    resolved = find_font_path(font_name)
+                    if resolved:
+                        font_path = str(resolved)
+                except Exception:
+                    pass
+            return MagazineTextConfig(
+                x=int(raw.get("x", 0)), y=int(raw.get("y", 0)),
+                font_size=int(raw.get("fontSize", 60)), color=raw.get("color", "#FFFFFF"),
+                font_path=font_path, font_name=font_name,
+                max_width=int(raw.get("maxWidth", 0)), align=raw.get("align", "left"),
+                uppercase=bool(raw.get("uppercase", False)), rotation=float(raw.get("rotation", 0.0)),
+                letter_spacing=float(raw.get("letterSpacing", 0.0)),
+                stroke_width=int(raw.get("strokeWidth", 0)), stroke_color=raw.get("strokeColor", "#000000"),
+                shadow_blur=int(raw.get("shadowBlur", 0)), shadow_color=raw.get("shadowColor", "#000000"),
+                shadow_offset_x=int(raw.get("shadowOffsetX", 0)), shadow_offset_y=int(raw.get("shadowOffsetY", 0)),
+                opacity=int(raw.get("opacity", 100)),
+            )
+
+        raw_bl = data.get("baseline")
+        raw_fo = data.get("fg_offset")
+        return TemplateMetadata(
+            template_id=data.get("templateId", data.get("id", "preview")),
+            name=data.get("name", "preview"),
+            png_path=png_url,
+            fg_path=data.get("fg_path", ""),
+            fg_offset=raw_fo if isinstance(raw_fo, dict) else None,
+            baseline=raw_bl if isinstance(raw_bl, dict) and raw_bl else None,
+            slots=slots,
+            anchor_mode=data.get("anchorMode", "bbox_center"),
+            width=w, height=h,
+            template_type=data.get("templateType", data.get("mode", "sticker")),
+            composite_mode=data.get("compositeMode", "overlay"),
+            sticker_filter=data.get("stickerFilter", "none"),
+            name_text=_txt(data.get("name_text", {})),
+            designation_text=_txt(data.get("designation_text", {})),
+            luggage_card_mode=bool(data.get("luggage_card_mode", False)),
+            print_dpi=int(data.get("print_dpi", 300)),
+            output_format=data.get("output_format", "jpeg"),
+        )
+    except Exception as e:
+        print(f"Error building preview metadata: {e}", flush=True)
+        return None
+
 
 class ComposeService:
     """

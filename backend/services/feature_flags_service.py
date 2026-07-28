@@ -9,8 +9,8 @@ effect on the very next request from the booth, no restart needed.
 Flags currently tracked:
 - modes.frame / modes.sticker / modes.word_template / modes.magazine — visibility
   of the mode cards on the booth StartScreen
-- rembg_profile — which segmentation profile rembg_service uses
-  ('isnet_hi' or 'silueta_hi'); see services/rembg_service.py for definitions
+- rembg_profile — which segmentation profile rembg_service uses (local models, or
+  a cloud_birefnet_* fal.ai profile); see services/rembg_service.py for definitions
 """
 
 import json
@@ -31,7 +31,10 @@ DEFAULTS: dict[str, Any] = {
         "word_template": True,
         "magazine": True,
     },
-    "rembg_profile": "human_hi",
+    # fal.ai BiRefNet Matting: trained on human matting data, which is what a people
+    # booth actually photographs. Falls back to human_hi per-request when fal is
+    # unreachable, and the admin panel can switch back to a local profile any time.
+    "rembg_profile": "cloud_birefnet_matting",
     "sticker_effect": "none",
     "sticker_stroke_color": "#FFFFFF",
     "sticker_stroke_width": 4,
@@ -46,7 +49,16 @@ DEFAULTS: dict[str, Any] = {
 # Valid rembg profile names. Kept in lockstep with services/rembg_service.PROFILES.
 # Duplicated here (instead of imported) to avoid a circular import — rembg_service
 # imports get_rembg_profile() from this module on every cutout call.
-PROFILES_NAMES = ("human_hi", "isnet_hi", "silueta_hi")
+PROFILES_NAMES = (
+    "human_hi",
+    "isnet_hi",
+    "silueta_hi",
+    # Cloud (fal.ai BiRefNet v2). Safe to select without a FAL_KEY — they fall
+    # back to the local pipeline per request rather than failing.
+    "cloud_birefnet_portrait",
+    "cloud_birefnet_matting",
+    "cloud_birefnet_general",
+)
 
 # Valid sticker edge effect names. Mirror of sticker_effects.EFFECT_NAMES; duplicated
 # here for the same circular-import reason.

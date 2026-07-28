@@ -31,6 +31,13 @@ class Settings(BaseSettings):
     AWS_REGION: str = "ap-south-1"
     AWS_S3_CDN_URL: Optional[str] = None  # Optional CloudFront/CDN URL
 
+    # --- fal.ai (cloud background removal; the cloud_birefnet_* rembg profiles) ---
+    # With no FAL_KEY those profiles fall back to the local model automatically,
+    # so leaving this unset is safe.
+    FAL_KEY: Optional[str] = None
+    FAL_ENDPOINT: str = "https://fal.run/fal-ai/birefnet/v2"
+    FAL_TIMEOUT_S: float = 12.0
+
     # --- Paths ---
     OUTPUTS_DIR: str = "outputs"
     WTM_TEMPLATES_DIR: str = "templates/wtm"

@@ -3,16 +3,26 @@ Background Removal Service
 ==========================
 Profile-based background removal with per-step timing for A/B comparison.
 
-Two profiles ship out of the box (configurable from admin UI via feature flags):
+Profiles ship out of the box, switchable live from the admin Feature Flags panel:
 
-  - "isnet_hi"     : model=isnet-general-use, max_input=1200 px, alpha-feather on
+Local (CPU, ~0.5-1.5 s, always available):
+  - "human_hi"     : model=u2net_human_seg,    max_input=1200 px, alpha-feather on
+                     Human-specialized; best local default for a people booth.
+  - "isnet_hi"     : model=isnet-general-use,  max_input=1200 px, alpha-feather on
                      Cleaner edges (hair, turban, collar). ~+0.7-1.0 s vs silueta.
   - "silueta_hi"   : model=silueta,            max_input=1600 px, alpha-feather on
                      Faster. Coarser edges but more pixels — good for full-body
                      compositions where edges are less prominent.
 
-Both profiles run a small Gaussian alpha-feather pass to smooth stair-step
-edges from the segmentation network.
+Cloud (fal.ai BiRefNet v2 on GPU, ~2-4 s, needs FAL_KEY — see cloud_rembg.py):
+  - "cloud_birefnet_portrait" / "_matting" / "_general"
+                     Three BiRefNet variants, so the winner can be chosen by A/B
+                     from the admin panel rather than a code change. Each falls
+                     back to the local pipeline automatically if fal is unusable.
+
+Local profiles run a small Gaussian alpha-feather pass to smooth stair-step edges
+from the segmentation network. Cloud results skip it — BiRefNet's refine_foreground
+already returns matted, decontaminated edges.
 
 Sessions are cached per model. Switching profiles at runtime lazily loads the
 new model on its first use (one-time cost).
@@ -28,6 +38,7 @@ from io import BytesIO
 from PIL import Image, ImageFilter
 from rembg import new_session, remove
 
+from services.cloud_rembg import CloudRembgError, remove_background_cloud
 from services.feature_flags_service import get_rembg_profile, get_sticker_effect, get_sticker_stroke_color, get_sticker_stroke_width, get_edge_cleanup
 from services.sticker_effects import (
     apply_drop_shadow,
@@ -59,6 +70,30 @@ PROFILES: dict[str, dict] = {
         "alpha_feather": 0.8,
     },
 }
+
+# --- Cloud profiles (fal.ai BiRefNet v2, GPU) ---------------------------------
+# Three variants so the winner can be picked by A/B from the admin panel instead
+# of a code change. Each inherits human_hi's local settings: that is what the
+# automatic fallback runs when fal is unconfigured / unreachable / circuit-broken,
+# and what warm_up() pre-loads, so selecting a cloud profile still boots a usable
+# local model.
+_CLOUD_VARIANTS = {
+    "cloud_birefnet_portrait": "Portrait",
+    "cloud_birefnet_matting": "Matting",
+    "cloud_birefnet_general": "General Use (Heavy)",
+}
+
+PROFILES.update(
+    {
+        name: {
+            **PROFILES["human_hi"],
+            "cloud": True,
+            "fal_model": fal_model,
+            "operating_resolution": "1024x1024",
+        }
+        for name, fal_model in _CLOUD_VARIANTS.items()
+    }
+)
 
 DEFAULT_PROFILE = "human_hi"
 
@@ -157,25 +192,19 @@ class BackgroundRemovalService:
             "mean_alpha": mean_alpha,
         }
 
-    def _remove_sync(self, input_image: Image.Image, profile: dict) -> tuple[Image.Image, dict]:
-        """
-        Synchronous removal. Returns (output_image, metrics_dict).
-        """
-        metrics: dict = {}
-        t_start = time.perf_counter()
+    def _infer_local(
+        self, input_image: Image.Image, profile: dict, use_alpha_matting: bool
+    ) -> tuple[Image.Image, dict]:
+        """CPU inference via rembg. Also the fallback path for cloud profiles."""
+        m: dict = {"source": "local"}
 
         # 1) downsize
         t0 = time.perf_counter()
         resized, did_downsize = self._downsize_image(input_image, profile["max_input"])
-        metrics["downsize_ms"] = (time.perf_counter() - t0) * 1000
-        metrics["did_downsize"] = did_downsize
-        metrics["input_size"] = f"{resized.width}x{resized.height}"
-        metrics["input_megapixels"] = (resized.width * resized.height) / 1_000_000
-
-        # Resolve sticker effect for this call so admin can hot-swap
-        effect = get_sticker_effect()
-        use_alpha_matting = (effect == "alpha_matting")
-        metrics["effect"] = effect
+        m["downsize_ms"] = (time.perf_counter() - t0) * 1000
+        m["did_downsize"] = did_downsize
+        m["input_size"] = f"{resized.width}x{resized.height}"
+        m["input_megapixels"] = (resized.width * resized.height) / 1_000_000
 
         # 2) inference — alpha_matting is rembg's built-in edge refinement and
         # has to be a kwarg on remove(); the other three effects are post-process.
@@ -196,17 +225,76 @@ class BackgroundRemovalService:
             raw_out = remove(resized, session=sess, **matting_kwargs)
         else:
             raw_out = remove(resized, session=sess)
-        metrics["inference_ms"] = (time.perf_counter() - t0) * 1000
+        m["inference_ms"] = (time.perf_counter() - t0) * 1000
+        return raw_out, m
+
+    @staticmethod
+    def _infer_cloud(input_image: Image.Image, profile: dict) -> tuple[Image.Image, dict]:
+        """BiRefNet on fal.ai. Raises CloudRembgError — caller falls back to local."""
+        raw_out, cm = remove_background_cloud(
+            input_image,
+            fal_model=profile["fal_model"],
+            operating_resolution=profile.get("operating_resolution", "1024x1024"),
+        )
+        return raw_out, {
+            "source": "cloud",
+            # Mapped onto the same metric names the local path uses so the PERF
+            # line stays one greppable format across both.
+            "downsize_ms": cm["encode_ms"],
+            "did_downsize": cm["did_downsize"],
+            "input_size": cm["input_size"],
+            "input_megapixels": cm["input_megapixels"],
+            "inference_ms": cm["request_ms"],
+            "upload_kb": cm["upload_kb"],
+            "ttfb_ms": cm["ttfb_ms"],
+            "download_ms": cm["download_ms"],
+            "decode_ms": cm["decode_ms"],
+            "fal_model": cm["fal_model"],
+        }
+
+    def _remove_sync(self, input_image: Image.Image, profile: dict) -> tuple[Image.Image, dict]:
+        """
+        Synchronous removal. Returns (output_image, metrics_dict).
+        """
+        metrics: dict = {}
+        t_start = time.perf_counter()
+
+        # Resolve sticker effect for this call so admin can hot-swap
+        effect = get_sticker_effect()
+        use_alpha_matting = (effect == "alpha_matting")
+        metrics["effect"] = effect
+
+        # 1+2) downsize + inference. Cloud profiles try fal first; *any* failure
+        # (no key, open breaker, timeout, bad response) drops through to the local
+        # pipeline, so a bad venue uplink costs quality but never stalls the booth.
+        raw_out = None
+        if profile.get("cloud"):
+            try:
+                raw_out, cloud_metrics = self._infer_cloud(input_image, profile)
+                metrics.update(cloud_metrics)
+            except CloudRembgError as exc:
+                print(f"CLOUD-FALLBACK reason={exc}", flush=True)
+                metrics["cloud_fallback_reason"] = str(exc)
+
+        if raw_out is None:
+            raw_out, local_metrics = self._infer_local(input_image, profile, use_alpha_matting)
+            metrics.update(local_metrics)
+
+        from_cloud = metrics["source"] == "cloud"
+        # alpha_matting exists only on the rembg path; on a cloud result the
+        # equivalent (refine_foreground) already ran server-side.
+        matting_applied = use_alpha_matting and not from_cloud
 
         # 2b) pre-feather alpha metrics (what the model itself produced)
         pre = self._alpha_metrics(raw_out)
         metrics["pre_feather_opaque_pct"] = pre.get("opaque_pct", 0.0)
         metrics["pre_feather_edge_pct"] = pre.get("edge_pct", 0.0)
 
-        # 3) feather (skip when alpha_matting is on — its output already has
-        # carefully-computed soft edges and we don't want to wash them out).
+        # 3) feather — skipped whenever the edges are already properly matted:
+        # alpha_matting output, or a cloud result (refine_foreground). Blurring
+        # those would only wash out what we paid for.
         t0 = time.perf_counter()
-        if use_alpha_matting:
+        if matting_applied or from_cloud:
             out = raw_out
         else:
             out = self._feather_alpha(raw_out, profile.get("alpha_feather", 0.0))
@@ -215,10 +303,13 @@ class BackgroundRemovalService:
         # 3b) edge cleanup (background-independent): drop segmentation ghosts and
         # recolor the soft edge ring with the subject's own colour so no old-background
         # halo survives onto the new template. Cheap (~tens of ms). Default ON.
+        # On cloud results only the island sweep runs — cheap insurance against stray
+        # blobs — since refine_foreground already decontaminated the edge ring.
         t0 = time.perf_counter()
-        if get_edge_cleanup() and not use_alpha_matting:
+        if get_edge_cleanup() and not matting_applied:
             out = clean_alpha_islands(out, low_alpha_cut=12, min_area_frac=0.02)
-            out = decontaminate_edges(out, grow=4, shrink=1)
+            if not from_cloud:
+                out = decontaminate_edges(out, grow=4, shrink=1)
         metrics["cleanup_ms"] = (time.perf_counter() - t0) * 1000
 
         # 4) post-process effect (stroke / shadow / unsharp).
@@ -266,19 +357,34 @@ class BackgroundRemovalService:
         # Run CPU work in a thread
         out, m = await asyncio.to_thread(self._remove_sync, input_image, profile)
 
+        # A cloud run reports upload size + result-decode time; a cloud profile that
+        # fell back to local reports why, so `grep CLOUD-FALLBACK` and the PERF line
+        # tell the same story.
+        if m["source"] == "cloud":
+            cloud_bits = (
+                f"upload={m['upload_kb']:.0f}KB ttfb={m['ttfb_ms']:.0f}ms "
+                f"download={m['download_ms']:.0f}ms result_decode={m['decode_ms']:.0f}ms "
+            )
+        elif m.get("cloud_fallback_reason"):
+            cloud_bits = f"cloud_fallback='{m['cloud_fallback_reason']}' "
+        else:
+            cloud_bits = ""
+
         # Two-line log: timing first (easy to grep), then quality metrics.
         print(
-            f"PERF [rembg] profile={profile_name} model={profile['model']} feather={profile['alpha_feather']} "
+            f"PERF [rembg] profile={profile_name} source={m['source']} "
+            f"model={m.get('fal_model') or profile['model']} feather={profile['alpha_feather']} "
             f"effect={m['effect']} "
             f"orig={original_size} -> input={m['input_size']} ({m['input_megapixels']:.2f}MP) "
             f"| decode={decode_ms:.0f}ms downsize={m['downsize_ms']:.0f}ms "
             f"inference={m['inference_ms']:.0f}ms feather={m['feather_ms']:.0f}ms "
             f"cleanup={m.get('cleanup_ms', 0):.0f}ms effect={m['effect_ms']:.0f}ms "
+            f"{cloud_bits}"
             f"TOTAL={m['total_ms']:.0f}ms",
             flush=True,
         )
         print(
-            f"QUAL [rembg] profile={profile_name} effect={m['effect']} out={m['output_size']} "
+            f"QUAL [rembg] profile={profile_name} source={m['source']} effect={m['effect']} out={m['output_size']} "
             f"subject_bbox={m['subject_bbox']} "
             f"coverage={m['coverage_pct']:.1f}% opaque={m['opaque_pct']:.1f}% edge_band={m['edge_pct']:.2f}% "
             f"mean_alpha={m['mean_alpha']:.1f} "
