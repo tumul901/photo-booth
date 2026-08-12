@@ -1,0 +1,27 @@
+{
+  "templateId": "cartoon-wide-blue",
+  "name": "Cartoon Triangle — Wide 16:9 (Blue)",
+  "pngUrl": "cartoon-frame-wide-blue.png",
+  "templateType": "cartoon",
+  "anchorMode": "full_frame",
+  "showVisualGuide": true,
+  "frameOverlay": true,
+  "allowManualPositioning": false,
+  "dimensions": {
+    "width": 1920,
+    "height": 1072
+  },
+  "captureAspect": "16:9",
+  "theme": "blue",
+  "slots": [
+    {
+      "id": "main",
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 1072,
+      "zIndex": 0
+    }
+  ],
+  "description": "Blue colourway of the wide canvas — the source artwork's native aspect, so the smoke and glow are uncropped. Triangle spans 45% of width, leaving room either side."
+}

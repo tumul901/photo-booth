@@ -1,0 +1,27 @@
+{
+  "templateId": "cartoon-square-blue",
+  "name": "Cartoon Triangle — Square (Blue)",
+  "pngUrl": "cartoon-frame-square-blue.png",
+  "templateType": "cartoon",
+  "anchorMode": "full_frame",
+  "showVisualGuide": true,
+  "frameOverlay": true,
+  "allowManualPositioning": false,
+  "dimensions": {
+    "width": 1080,
+    "height": 1080
+  },
+  "captureAspect": "1:1",
+  "theme": "blue",
+  "slots": [
+    {
+      "id": "main",
+      "x": 0,
+      "y": 0,
+      "width": 1080,
+      "height": 1080,
+      "zIndex": 0
+    }
+  ],
+  "description": "Blue colourway of the square canvas. Same keyed matte and identical triangle geometry as the orange frame (within 1px), so the capture guide is unchanged; only the neon stroke and the portrait's tint hue differ."
+}

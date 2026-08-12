@@ -1,0 +1,27 @@
+{
+  "templateId": "cartoon-portrait-blue",
+  "name": "Cartoon Triangle — Portrait 4:5 (Blue)",
+  "pngUrl": "cartoon-frame-portrait-blue.png",
+  "templateType": "cartoon",
+  "anchorMode": "full_frame",
+  "showVisualGuide": true,
+  "frameOverlay": true,
+  "allowManualPositioning": false,
+  "dimensions": {
+    "width": 1080,
+    "height": 1350
+  },
+  "captureAspect": "4:5",
+  "theme": "blue",
+  "slots": [
+    {
+      "id": "main",
+      "x": 0,
+      "y": 0,
+      "width": 1080,
+      "height": 1350,
+      "zIndex": 0
+    }
+  ],
+  "description": "Blue colourway of the portrait print format. Square frame centred on a taller backdrop, so the triangle spans 81% of width but only 56% of height, leaving bands above and below."
+}
