@@ -1,4 +1,4 @@
-import cairosvg, io, hashlib
+import io, hashlib
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 import logging
@@ -101,6 +101,7 @@ def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
 def rasterize_svg(svg_path: Path, target_width: int, target_height: int) -> Image.Image | None:
     """Rasterize SVG to PIL RGBA image. Returns None on any failure."""
     try:
+        import cairosvg
         png_bytes = cairosvg.svg2png(
             url=str(svg_path),
             output_width=target_width,

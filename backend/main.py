@@ -95,6 +95,10 @@ async def lifespan(_app: FastAPI):
     jobs_service.init()
     rembg_service.warm_up()
     face_service.warm_up()
+    # Watercolor mode's segmenter + landmarker. Downloads ~20MB on first run and
+    # degrades to an unavailable mode rather than blocking startup if that fails.
+    from services.face_parse_service import face_parse_service
+    face_parse_service.warm_up()
     from services.wtm_config import load_all_configs
     from pathlib import Path
     Path(settings.WTM_TEMPLATES_DIR).mkdir(parents=True, exist_ok=True)
@@ -113,11 +117,16 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — allow frontend origin (and localhost for dev)
+# CORS — allow the configured frontend origin, plus localhost for dev.
+# 3001 is included because Next.js silently moves to the next free port when 3000
+# is taken; without it the booth loads but every API call fails CORS, which looks
+# like a broken backend rather than a port mismatch.
 allow_origins = [
     settings.FRONTEND_URL,
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
 ]
 
 app.add_middleware(

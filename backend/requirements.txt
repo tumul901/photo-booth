@@ -6,6 +6,10 @@ python-multipart>=0.0.6
 pydantic>=2.5.0
 pydantic-settings>=2.1.0
 mediapipe>=0.10.9
+# Declared explicitly rather than relied on transitively via mediapipe: the
+# Dockerfile's ARM64 fallback reinstalls without mediapipe, which would otherwise
+# drop cv2 and break face_service + cartoon_service at import time.
+opencv-contrib-python>=4.8.0
 numpy>=1.26.0
 requests>=2.31.0
 boto3>=1.34.0

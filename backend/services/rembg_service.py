@@ -5,14 +5,17 @@ Profile-based background removal with per-step timing for A/B comparison.
 
 Profiles ship out of the box, switchable live from the admin Feature Flags panel:
 
-Local (CPU, ~0.5-1.5 s, always available):
-  - "human_hi"     : model=u2net_human_seg,    max_input=1200 px, alpha-feather on
-                     Human-specialized; best local default for a people booth.
-  - "isnet_hi"     : model=isnet-general-use,  max_input=1200 px, alpha-feather on
-                     Cleaner edges (hair, turban, collar). ~+0.7-1.0 s vs silueta.
-  - "silueta_hi"   : model=silueta,            max_input=1600 px, alpha-feather on
-                     Faster. Coarser edges but more pixels — good for full-body
-                     compositions where edges are less prominent.
+Local (CPU, always available). Segmentation size is the quality ceiling:
+  - "isnet_max"    : model=isnet-general-use,  1024x1024 mask, max_input=1600 px
+                     DEFAULT. Best local quality — the mask is downscaled onto the
+                     frame rather than stretched, so hair and collars hold up.
+                     ~1.4 s.
+  - "isnet_hi"     : same model, max_input=1200 px, heavier feather. ~1.35 s.
+  - "human_hi"     : model=u2net_human_seg,     320x320 mask. Human-specialized but
+                     the mask is upscaled ~2.25x onto a booth capture, so edges
+                     arrive soft and hair reads as a single lump. Fast (~0.6 s);
+                     keep as the speed option / escape hatch.
+  - "silueta_hi"   : model=silueta,             320x320 mask. Fastest, coarsest.
 
 Cloud (fal.ai BiRefNet v2 on GPU, ~2-4 s, needs FAL_KEY — see cloud_rembg.py):
   - "cloud_birefnet_portrait" / "_matting" / "_general"
@@ -51,25 +54,46 @@ from services.sticker_effects import (
 # --- Profile definitions ------------------------------------------------------
 
 PROFILES: dict[str, dict] = {
-    "human_hi": {
-        # Human-specialized model: understands the body silhouette, so it doesn't
-        # bleed the foreground into busy backgrounds (office clutter, similar-colored
-        # walls) the way the general models do. Cleaner edges AND faster (~0.5s).
-        "model": "u2net_human_seg",
-        "max_input": 1200,
-        "alpha_feather": 0.8,
+    # The number that matters most here is the model's INTERNAL segmentation size,
+    # which is fixed per architecture and is the real ceiling on edge quality:
+    # the network emits a mask at that size and it is then scaled back up to the
+    # frame. The u2net family works at 320x320 — on a 576x720 booth capture that
+    # mask is upscaled ~2.25x, which is why its edges arrive soft and blobby and
+    # hair reads as one smooth lump. ISNet works at 1024x1024, so its mask is
+    # downscaled onto the frame instead of stretched. Measured on this CPU:
+    # u2net 0.62s vs isnet 1.36s — a fifth of a booth second for a 3.2x finer mask.
+    "isnet_max": {
+        # Best local quality. Default.
+        "model": "isnet-general-use",
+        "max_input": 1600,      # keep more RGB detail; the mask is 1024 regardless
+        "alpha_feather": 0.4,   # a 1024 mask needs far less smoothing than a 320 one
     },
     "isnet_hi": {
         "model": "isnet-general-use",
         "max_input": 1200,
         "alpha_feather": 0.8,   # GaussianBlur radius in px on the alpha channel
     },
+    "human_hi": {
+        # Human-specialized but only 320x320 internally. Kept as the fast option
+        # and as an escape hatch if isnet ever misbehaves on a particular venue.
+        "model": "u2net_human_seg",
+        "max_input": 1200,
+        "alpha_feather": 0.8,
+    },
     "silueta_hi": {
+        # Also 320x320 internally. Fastest, coarsest.
         "model": "silueta",
         "max_input": 1600,
         "alpha_feather": 0.8,
     },
 }
+
+# Locally-available models that are NOT offered as profiles, and why — so this
+# gets measured once rather than re-litigated:
+#   birefnet-general-lite  1024x1024, best mask measured (IoU 0.9855) but 47s on
+#   birefnet-portrait      CPU. BiRefNet is a GPU architecture; use the cloud
+#   birefnet-general       profiles below to get it at usable speed.
+#   bria-rmbg              1024x1024, 88s on CPU. Same story, plus a 977MB weight.
 
 # --- Cloud profiles (fal.ai BiRefNet v2, GPU) ---------------------------------
 # Three variants so the winner can be picked by A/B from the admin panel instead
@@ -86,7 +110,7 @@ _CLOUD_VARIANTS = {
 PROFILES.update(
     {
         name: {
-            **PROFILES["human_hi"],
+            **PROFILES["isnet_max"],
             "cloud": True,
             "fal_model": fal_model,
             "operating_resolution": "1024x1024",
@@ -95,7 +119,7 @@ PROFILES.update(
     }
 )
 
-DEFAULT_PROFILE = "human_hi"
+DEFAULT_PROFILE = "isnet_max"
 
 
 def _resolve_profile(name: str | None) -> tuple[str, dict]:
@@ -159,6 +183,23 @@ class BackgroundRemovalService:
         r, g, b, a = img.split()
         a_soft = a.filter(ImageFilter.GaussianBlur(radius=radius))
         return Image.merge("RGBA", (r, g, b, a_soft))
+
+    @staticmethod
+    def _solidify_alpha(img: Image.Image, threshold: int) -> Image.Image:
+        """
+        Snap near-opaque alpha to fully opaque.
+
+        Segmentation networks end in a sigmoid, so their confident interior lands
+        at 252-254 rather than 255. Composited, that leaves a faint uniform veil
+        over the whole subject — invisible on one layer, but it compounds and it
+        also makes the opaque_pct metric read 0%. Only the top of the range is
+        touched, so genuine soft edges (hair) are left alone.
+        """
+        if threshold <= 0 or img.mode != "RGBA":
+            return img
+        r, g, b, a = img.split()
+        a = a.point(lambda v: 255 if v >= threshold else v)
+        return Image.merge("RGBA", (r, g, b, a))
 
     @staticmethod
     def _alpha_metrics(img: Image.Image) -> dict:
@@ -298,6 +339,7 @@ class BackgroundRemovalService:
             out = raw_out
         else:
             out = self._feather_alpha(raw_out, profile.get("alpha_feather", 0.0))
+        out = self._solidify_alpha(out, profile.get("alpha_solidify", 250))
         metrics["feather_ms"] = (time.perf_counter() - t0) * 1000
 
         # 3b) edge cleanup (background-independent): drop segmentation ghosts and

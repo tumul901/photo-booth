@@ -15,6 +15,13 @@ build/
 outputs/*
 !outputs/.gitkeep
 
+# Large ML models fetched on first run (face_parse_service downloads these to
+# backend/models and degrades gracefully if the fetch fails). Kept out of git
+# because 20MB of binaries in history cannot be undone, whereas a re-download
+# can. The small legacy detector models predate this and stay tracked.
+backend/models/selfie_multiclass_256x256.tflite
+backend/models/face_landmarker.task
+
 # Environment
 .env
 .env.local
