@@ -68,17 +68,35 @@ RENDER_HEIGHT = 1350
 # corpse, so skin is held to a minimum warmth without being pushed to a fixed
 # complexion.
 
+# Level counts are deliberately generous, especially on skin. Few bands over a
+# wide value range is what "heavy stylisation" actually looks like: a face
+# collapses into three or four big patches whose edges land wherever the
+# quantiser fell rather than on the cheekbone, nose or jaw that make a person
+# recognisable. More bands over a NARROWER range keeps the same flat-shaded
+# language while letting real facial structure survive, which is what carries
+# the likeness.
+
 REGION_SPEC: dict[int, dict] = {
-    FACE_SKIN: {"levels": 4, "val": (0.52, 0.76, 1.00, 1.20), "sat": (1.22, 1.08, 1.00, 0.78),
-                "v_range": (0.42, 0.88), "s_range": (0.24, 0.58)},
-    BODY_SKIN: {"levels": 3, "val": (0.58, 0.85, 1.12),       "sat": (1.20, 1.05, 0.88),
-                "v_range": (0.40, 0.88), "s_range": (0.22, 0.58)},
-    HAIR:      {"levels": 3, "val": (0.45, 0.85, 1.45),       "sat": (1.10, 1.00, 0.80),
-                "v_range": (0.16, 0.78), "s_range": (0.06, 0.62)},
-    CLOTHES:   {"levels": 3, "val": (0.55, 0.90, 1.30),       "sat": (1.12, 1.00, 0.85),
-                "v_range": (0.20, 0.88), "s_range": (0.00, 0.85)},
-    OTHERS:    {"levels": 2, "val": (0.65, 1.15),             "sat": (1.10, 0.90),
-                "v_range": (0.18, 0.85), "s_range": (0.00, 0.72)},
+    FACE_SKIN: {"levels": 6,
+                "val": (0.64, 0.77, 0.87, 0.96, 1.06, 1.17),
+                "sat": (1.14, 1.08, 1.03, 1.00, 0.94, 0.84),
+                "v_range": (0.44, 0.90), "s_range": (0.20, 0.52)},
+    BODY_SKIN: {"levels": 5,
+                "val": (0.68, 0.82, 0.93, 1.03, 1.14),
+                "sat": (1.12, 1.06, 1.00, 0.95, 0.87),
+                "v_range": (0.42, 0.90), "s_range": (0.18, 0.52)},
+    HAIR:      {"levels": 4,
+                "val": (0.56, 0.82, 1.06, 1.34),
+                "sat": (1.08, 1.00, 0.93, 0.83),
+                "v_range": (0.16, 0.80), "s_range": (0.05, 0.58)},
+    CLOTHES:   {"levels": 4,
+                "val": (0.63, 0.86, 1.06, 1.26),
+                "sat": (1.08, 1.00, 0.95, 0.87),
+                "v_range": (0.20, 0.90), "s_range": (0.00, 0.80)},
+    OTHERS:    {"levels": 3,
+                "val": (0.72, 1.00, 1.24),
+                "sat": (1.06, 1.00, 0.90),
+                "v_range": (0.18, 0.86), "s_range": (0.00, 0.70)},
 }
 
 # Order matters: later regions paint over earlier ones where masks overlap after
@@ -86,25 +104,49 @@ REGION_SPEC: dict[int, dict] = {
 PAINT_ORDER = (CLOTHES, OTHERS, BODY_SKIN, FACE_SKIN, HAIR)
 
 
+#
+# Presets run lightest to heaviest. The knobs that most affect how much the
+# guest still looks like themselves are, in order:
+#
+#   band_sigma        how wide a shading band is. LOW keeps small real structure
+#                     (nose, cheekbone, lip line); high sweeps it into big
+#                     abstract patches.
+#   feature_strength  how opaquely drawn eyes/brows/lips replace the real ones.
+#   line_scale        outline weight — heavy ink reads as a cartoon of a person
+#                     rather than a portrait of one.
+#   grade / rim       theme colour pushed into the skin, which tints a guest away
+#                     from their own complexion faster than anything else here.
+
 PRESETS: dict[str, dict] = {
+    # Default. Tuned for likeness: the guest should be recognisable first and
+    # stylised second.
+    "wc_natural": {
+        "presmooth": 1, "bilateral_sigma": 32.0, "clahe_clip": 0.6,
+        "band_sigma": 0.022, "band_smooth": 0.7, "line_scale": 0.55,
+        "grade": 0.05, "level_bias": 0.02, "rim": 0.18,
+        "feature_strength": 0.55,
+    },
     "wc_soft": {
         "presmooth": 2, "bilateral_sigma": 45.0, "clahe_clip": 0.8,
-        "band_sigma": 0.065, "band_smooth": 0.9, "line_scale": 0.85,
-        "grade": 0.10, "level_bias": 0.04, "rim": 0.42,
+        "band_sigma": 0.038, "band_smooth": 0.9, "line_scale": 0.75,
+        "grade": 0.08, "level_bias": 0.04, "rim": 0.30,
+        "feature_strength": 0.75,
     },
     "wc_standard": {
         "presmooth": 2, "bilateral_sigma": 60.0, "clahe_clip": 1.0,
         "band_sigma": 0.050, "band_smooth": 1.0, "line_scale": 1.05,
         "grade": 0.14, "level_bias": 0.0, "rim": 0.55,
+        "feature_strength": 1.0,
     },
     "wc_bold": {
         "presmooth": 3, "bilateral_sigma": 80.0, "clahe_clip": 1.4,
         "band_sigma": 0.038, "band_smooth": 1.25, "line_scale": 1.3,
         "grade": 0.18, "level_bias": -0.04, "rim": 0.68,
+        "feature_strength": 1.0,
     },
 }
 
-DEFAULT_PRESET = "wc_standard"
+DEFAULT_PRESET = "wc_natural"
 
 
 # ── Colour helpers ───────────────────────────────────────────────────────────
@@ -507,6 +549,7 @@ def draw_features(
     line_color: tuple[int, int, int],
     *,
     line_scale: float = 1.0,
+    feature_strength: float = 1.0,
 ) -> dict[str, int]:
     """
     Draw eyes, brows, lips and nose as vector shapes at measured positions.
@@ -534,6 +577,30 @@ def draw_features(
     drawn = {"eyes": 0, "brows": 0, "lips": 0, "nose": 0, "teeth": 0, "jaw": 0}
     if parse is None or parse.landmarks is None:
         return drawn
+
+    def paint(poly: np.ndarray, colour, strength: float) -> None:
+        """
+        Lay a feature colour over a polygon WITHOUT erasing what is underneath.
+
+        A solid fill is what makes drawn features look generic: brows and lips
+        are the two shapes whose exact outline carries most of a likeness, and
+        replacing them with a flat polygon swaps the guest's own for a stencil.
+        Blending keeps their real edge and thickness variation showing through
+        while still reading as deliberately drawn.
+        """
+        a = float(np.clip(strength, 0.0, 1.0))
+        if a <= 0:
+            return
+        if a >= 1.0:
+            cv2.fillPoly(canvas, [poly], colour, cv2.LINE_AA)
+            return
+        layer = canvas.copy()
+        cv2.fillPoly(layer, [poly], colour, cv2.LINE_AA)
+        m = np.zeros(canvas.shape[:2], np.uint8)
+        cv2.fillPoly(m, [poly], 255, cv2.LINE_AA)
+        sel = m > 0
+        blended = canvas[sel].astype(np.float32) * (1 - a) + layer[sel].astype(np.float32) * a
+        canvas[sel] = np.clip(blended, 0, 255).astype(np.uint8)
 
     h, w = canvas.shape[:2]
     oval = parse.points(FACE_OVAL)
@@ -581,7 +648,12 @@ def draw_features(
                      if len(ring_px) >= 8 else np.array((200, 175, 155), np.float32))
         sclera = _shift(skin_near, v=1.55, s=0.18)
 
-        cv2.fillPoly(canvas, [eye], sclera, cv2.LINE_AA)
+        # Sclera gets the same floor as the iris below, and for the same reason.
+        # Brows and lips improve as feature_strength drops, because their real
+        # outline shows through. An eye does not: half-painting it leaves neither
+        # a photographic eye nor a drawn one, just a smudge where the eye should
+        # be. Eyes are therefore exempt from the lightness dial.
+        paint(eye, sclera, 0.55 + 0.35 * feature_strength)
 
         # Iris: real centre and radius from the landmarker, real colour from the
         # photo. Drawn into a scratch layer and masked to the lid opening so a
@@ -602,7 +674,16 @@ def draw_features(
         # drawn eye look alive rather than dead.
         cv2.circle(layer, (int(centre[0] - radius * 0.34), int(centre[1] - radius * 0.36)),
                    max(1, int(round(radius * 0.24))), (250, 250, 252), -1, cv2.LINE_AA)
-        canvas[eye_mask > 0] = layer[eye_mask > 0]
+        # The iris is drawn near-opaque regardless of feature_strength. It is the
+        # one feature where blending works AGAINST likeness: the colour is
+        # sampled from the guest's own eye, so drawing it faithfully is what
+        # makes it theirs, whereas half-blending it with the bright sclera fill
+        # underneath washes brown eyes out to a pale grey that belongs to nobody.
+        a_iris = float(np.clip(0.55 + 0.45 * feature_strength, 0.0, 1.0))
+        sel = eye_mask > 0
+        canvas[sel] = np.clip(
+            canvas[sel].astype(np.float32) * (1 - a_iris)
+            + layer[sel].astype(np.float32) * a_iris, 0, 255).astype(np.uint8)
 
         # Lid: heavier along the top, as a drawn eye always is.
         cv2.polylines(canvas, [eye], True, line_color, thin, cv2.LINE_AA)
@@ -617,8 +698,8 @@ def draw_features(
         brow = parse.points(brow_ids)
         if brow is None or len(brow) < 4:
             continue
-        brow_col = _shift(_sample(source_rgb, brow, (60, 40, 30)), v=0.72, s=1.1)
-        cv2.fillPoly(canvas, [brow], brow_col, cv2.LINE_AA)
+        brow_col = _shift(_sample(source_rgb, brow, (60, 40, 30)), v=0.80, s=1.05)
+        paint(brow, brow_col, 0.72 * feature_strength)
         drawn["brows"] += 1
 
     # ── Lips ──
@@ -629,7 +710,7 @@ def draw_features(
         # lipstick onto every guest, and the outer lip polygon overlaps moustache
         # on a lot of faces, so an aggressive tint stains facial hair pink.
         lip_col = _shift(_sample(source_rgb, outer, (150, 90, 85)), v=0.97, s=1.10)
-        cv2.fillPoly(canvas, [outer], lip_col, cv2.LINE_AA)
+        paint(outer, lip_col, 0.68 * feature_strength)
         cv2.polylines(canvas, [outer], True, line_color, thin, cv2.LINE_AA)
         drawn["lips"] += 1
 
@@ -639,7 +720,7 @@ def draw_features(
             # open. Drawing teeth into a closed mouth is the classic uncanny
             # failure of automated avatars.
             if gap > face_h * 0.035:
-                cv2.fillPoly(canvas, [inner], _shift(lip_col, v=0.30, s=0.8), cv2.LINE_AA)
+                paint(inner, _shift(lip_col, v=0.30, s=0.8), 0.80 * feature_strength)
                 m = np.zeros((h, w), np.uint8)
                 cv2.fillPoly(m, [inner], 255)
                 ys, xs = np.nonzero(m)
@@ -708,6 +789,7 @@ def watercolor_preset(
     grade = params.pop("grade")
     line_scale = params.pop("line_scale")
     rim = params.pop("rim")
+    feature_strength = params.pop("feature_strength", 1.0)
 
     cropped = portrait_crop(img, landmarks) if auto_crop else img
     if cropped.mode != "RGBA":
@@ -743,7 +825,8 @@ def watercolor_preset(
     stats = draw_outlines(flat, painted, alpha, ink, line_scale=line_scale)
     # Features last so lids and lips sit on top of the region outlines rather
     # than being crossed by them.
-    feats = draw_features(flat, rgb, parse, ink, line_scale=line_scale)
+    feats = draw_features(flat, rgb, parse, ink, line_scale=line_scale,
+                          feature_strength=feature_strength)
     add_rim_light(flat, alpha, theme, strength=rim)
     ink_ms = (time.perf_counter() - t_ink) * 1000
 
