@@ -9,10 +9,11 @@
 
 import TemplateSelector from '../TemplateSelector';
 import styles from './TemplateScreen.module.css';
+import type { ProcessingMode } from '@/types/processingMode';
 
 interface TemplateScreenProps {
   selectedTemplate: string;
-  processingMode: 'frame' | 'sticker' | 'word_template' | 'magazine';
+  processingMode: ProcessingMode;
   onSelect: (id: string, compositeMode: string) => void;
   onNext: () => void;
   onBack: () => void;

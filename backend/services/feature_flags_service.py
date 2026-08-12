@@ -7,8 +7,8 @@ Stored in backend/data/feature_flags.json. Hot-reloadable — admin changes take
 effect on the very next request from the booth, no restart needed.
 
 Flags currently tracked:
-- modes.frame / modes.sticker / modes.word_template / modes.magazine — visibility
-  of the mode cards on the booth StartScreen
+- modes.frame / modes.sticker / modes.word_template / modes.magazine / modes.cartoon
+  / modes.watercolor — visibility of the mode cards on the booth StartScreen
 - rembg_profile — which segmentation profile rembg_service uses (local models, or
   a cloud_birefnet_* fal.ai profile); see services/rembg_service.py for definitions
 """
@@ -30,10 +30,15 @@ DEFAULTS: dict[str, Any] = {
         "sticker": True,
         "word_template": True,
         "magazine": True,
+        "cartoon": True,
+        "watercolor": True,
     },
     # fal.ai BiRefNet Matting: trained on human matting data, which is what a people
-    # booth actually photographs. Falls back to human_hi per-request when fal is
-    # unreachable, and the admin panel can switch back to a local profile any time.
+    # booth actually photographs, and runs on GPU so it is usable at ~2-4s.
+    # BiRefNet locally is 47s+ on CPU, so cloud is the only practical way to get it.
+    # Without a FAL_KEY this silently falls back per-request to isnet_max — which
+    # is why the fallback model matters as much as the cloud one. Adding a key
+    # later upgrades the booth with no config change.
     "rembg_profile": "cloud_birefnet_matting",
     "sticker_effect": "none",
     "sticker_stroke_color": "#FFFFFF",
@@ -50,8 +55,9 @@ DEFAULTS: dict[str, Any] = {
 # Duplicated here (instead of imported) to avoid a circular import — rembg_service
 # imports get_rembg_profile() from this module on every cutout call.
 PROFILES_NAMES = (
-    "human_hi",
+    "isnet_max",
     "isnet_hi",
+    "human_hi",
     "silueta_hi",
     # Cloud (fal.ai BiRefNet v2). Safe to select without a FAL_KEY — they fall
     # back to the local pipeline per request rather than failing.

@@ -208,6 +208,16 @@
   opacity: 0.5;
 }
 
+/* Frame matte: full opacity and `fill`, not `contain`. The asset is authored at
+   the capture aspect, so filling maps it 1:1 onto the video — the same mapping
+   the backend uses when compositing it onto the artwork. */
+.frameOverlayImage {
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  opacity: 1;
+}
+
 /* Zoom Control */
 .zoomControl {
   display: flex;

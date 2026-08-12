@@ -11,11 +11,12 @@ import { useState, useEffect, useMemo } from 'react';
 import styles from './TemplateSelector.module.css';
 
 import type { WTMTemplateListItem } from '@/types/wtm';
+import type { ProcessingMode } from '@/types/processingMode';
 
 interface Template {
   templateId: string;
   name: string;
-  templateType: 'frame' | 'sticker' | 'word_template' | 'magazine';
+  templateType: ProcessingMode;
   compositeMode: string;
   slotCount: number;
   anchorMode: string;
@@ -24,10 +25,20 @@ interface Template {
 interface TemplateSelectorProps {
   selectedTemplate: string;
   onSelect: (templateId: string, compositeMode: string) => void;
-  processingMode?: 'frame' | 'sticker' | 'word_template' | 'magazine';
+  processingMode?: ProcessingMode;
 }
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+// Empty-state wording per mode. Any mode missing here falls back to "templates".
+const MODE_LABELS: Record<string, string> = {
+  frame: 'frames',
+  sticker: 'sticker templates',
+  word_template: 'word templates',
+  magazine: 'magazine covers',
+  cartoon: 'cartoon templates',
+  watercolor: 'watercolor templates',
+};
 
 export default function TemplateSelector({
   selectedTemplate,
@@ -88,7 +99,7 @@ export default function TemplateSelector({
     return (
       <div className={styles.container}>
         <p className={styles.empty}>
-          {loading ? 'Loading...' : `No ${processingMode === 'frame' ? 'frames' : processingMode === 'sticker' ? 'sticker templates' : 'word templates'} available`}
+          {loading ? 'Loading...' : `No ${MODE_LABELS[processingMode] ?? 'templates'} available`}
         </p>
       </div>
     );

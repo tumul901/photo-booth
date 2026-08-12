@@ -11,10 +11,11 @@
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import styles from './StartScreen.module.css';
+import type { ProcessingMode } from '@/types/processingMode';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
-type Mode = 'frame' | 'sticker' | 'word_template' | 'magazine';
+type Mode = ProcessingMode;
 
 interface ModeSelectScreenProps {
   onSelectMode: (mode: Mode) => void;
@@ -50,6 +51,18 @@ const MODE_CARDS: Array<{ key: Mode; icon: string; title: string; desc: string }
     title: 'Magazine Cover',
     desc: 'Become the cover star of your own magazine',
   },
+  {
+    key: 'cartoon',
+    icon: '🎨',
+    title: 'Cartoon Artwork',
+    desc: 'Transform into a comic-style illustration',
+  },
+  {
+    key: 'watercolor',
+    icon: '🖌️',
+    title: 'Watercolor Filter',
+    desc: 'Become a hand-drawn illustrated portrait',
+  },
 ];
 
 export default function ModeSelectScreen({ onSelectMode }: ModeSelectScreenProps) {
@@ -63,10 +76,13 @@ export default function ModeSelectScreen({ onSelectMode }: ModeSelectScreenProps
         if (active && data) setFlags(data);
       })
       .catch(() => {
-        // On network failure, fail open — show all four cards rather than locking the booth.
+        // On network failure, fail open — show every card rather than locking the booth.
         if (active) {
           setFlags({
-            modes: { frame: true, sticker: true, word_template: true, magazine: true },
+            modes: {
+              frame: true, sticker: true, word_template: true,
+              magazine: true, cartoon: true, watercolor: true,
+            },
             rembg_profile: 'isnet_hi',
           });
         }

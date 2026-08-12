@@ -11,6 +11,7 @@ import { useState } from 'react';
 import WebcamCapture from '../WebcamCapture';
 import ImageUpload from '../ImageUpload';
 import styles from './CaptureScreen.module.css';
+import type { ProcessingMode } from '@/types/processingMode';
 
 type CaptureMode = 'webcam' | 'upload';
 
@@ -20,7 +21,7 @@ interface CaptureScreenProps {
   onBack: () => void;
   onError: (msg: string) => void;
   isProcessing: boolean;
-  processingMode?: 'frame' | 'sticker' | 'word_template' | 'magazine';
+  processingMode?: ProcessingMode;
 }
 
 export default function CaptureScreen({

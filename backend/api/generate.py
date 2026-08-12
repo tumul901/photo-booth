@@ -23,6 +23,16 @@ from services.face_service import face_service
 from services.storage_service import storage_service
 from services.stats_service import stats_service
 from services.jobs_service import jobs_service
+from services.cartoon_service import (
+    duotone_preset, get_theme, PRESETS as CARTOON_PRESETS, THEMES as CARTOON_THEMES,
+    DEFAULT_PRESET, DEFAULT_THEME, RENDER_HEIGHT,
+)
+from services.geometric_overlays import compose_duotone_artwork
+from services.watercolor_service import (
+    watercolor_preset as render_watercolor, PRESETS as WC_PRESETS,
+    DEFAULT_PRESET as DEFAULT_WC_PRESET, RENDER_HEIGHT as WC_RENDER_HEIGHT,
+)
+from services.plexus_background import generate_plexus
 
 router = APIRouter()
 
@@ -55,6 +65,36 @@ def _cache_cutout(output_id: str, cutout: Image.Image) -> None:
         _cutout_cache.popitem(last=False)
 
 
+def _load_raw_template_config(template_id: str) -> dict:
+    """
+    Read a template's JSON verbatim, for keys TemplateMetadata doesn't model
+    (currently the cartoon triangle geometry). The booth's capture guide reads the
+    same file through /api/admin/templates/{id}/config, so the triangle drawn on
+    the live camera and the one drawn on the artwork stay in lockstep from a
+    single source of truth. Returns {} on any failure — callers use defaults.
+    """
+    try:
+        from services.compose import _resolve_template_json
+        path = _resolve_template_json(template_id, TEMPLATES_DIR)
+        if path and os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"WARNING: raw config read failed for {template_id}: {e}", flush=True)
+    return {}
+
+
+def _hex_to_rgb(value: str, fallback: tuple[int, int, int]) -> tuple[int, int, int]:
+    """Parse '#RRGGBB' into an RGB tuple, falling back on anything malformed."""
+    try:
+        h = value.lstrip("#")
+        if len(h) == 6:
+            return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+    except Exception:
+        pass
+    return fallback
+
+
 class SlotAssignment(BaseModel):
     """Assignment of a photo to a specific template slot."""
     slot_id: str
@@ -76,7 +116,7 @@ async def generate_composite(
     template_id: str = Form(...),
     photos: List[UploadFile] = File(...),
     slot_assignments: Optional[str] = Form(None),
-    processing_mode: str = Form("sticker"),  # "sticker", "frame", "pre_extracted"
+    processing_mode: str = Form("sticker"),  # "sticker", "frame", "pre_extracted", "cartoon"
     photo_position: Optional[str] = Form(None),  # JSON: {"x", "y", "scale", "editorWidth"}
     magazine_name: str = Form(""),           # Magazine mode: person's name
     magazine_designation: str = Form(""),    # Magazine mode: person's designation
@@ -84,6 +124,9 @@ async def generate_composite(
     overlay_designation: str = Form(""),     # Sticker/luggage card: person's designation
     guest_name: str = Form(""),              # Capture form: guest's name (optional)
     guest_phone: str = Form(""),             # Capture form: guest's phone (optional)
+    cartoon_preset: str = Form(DEFAULT_PRESET),  # Cartoon mode: tonal preset name
+    cartoon_theme: str = Form(""),               # Colour theme, shared by cartoon + watercolor ("" = template default)
+    watercolor_preset: str = Form(DEFAULT_WC_PRESET),  # Watercolor mode: shading preset name
 ):
     """
     Generate a composited photo from uploaded image(s) and a template.
@@ -110,8 +153,14 @@ async def generate_composite(
             raise HTTPException(status_code=400, detail="At least one photo is required")
         
         # Validate processing mode
-        if processing_mode not in ["sticker", "frame", "pre_extracted"]:
+        if processing_mode not in ["sticker", "frame", "pre_extracted", "cartoon", "watercolor"]:
             processing_mode = "sticker"
+
+        # Validate presets — an unknown name falls back rather than 500s
+        if cartoon_preset not in CARTOON_PRESETS:
+            cartoon_preset = DEFAULT_PRESET
+        if watercolor_preset not in WC_PRESETS:
+            watercolor_preset = DEFAULT_WC_PRESET
         
         # Load template metadata
         template_meta = load_template_metadata(template_id, TEMPLATES_DIR)
@@ -137,9 +186,26 @@ async def generate_composite(
                 height=1200,
             )
         
+        # Cartoon mode reads extra geometry straight from the template JSON.
+        # `guest_framed` is true when the booth showed a live triangle guide and the
+        # template asks for full_frame: the guest already composed the shot against
+        # that guide, so we must preserve their framing rather than re-cropping.
+        ART_MODES = ("cartoon", "watercolor")
+        raw_template_cfg = _load_raw_template_config(template_id) if processing_mode in ART_MODES else {}
+        guest_framed = bool(
+            raw_template_cfg.get("showVisualGuide")
+            and getattr(template_meta, "anchor_mode", "") == "full_frame"
+        )
+
+        # Colour theme: explicit request wins, else the template's own, else the
+        # service default. Unknown names fall back rather than 500.
+        cartoon_theme = cartoon_theme or raw_template_cfg.get("theme", DEFAULT_THEME)
+        if cartoon_theme not in CARTOON_THEMES:
+            cartoon_theme = DEFAULT_THEME
+
         # Process each photo
         processed_stickers = [] # List of {"image": PIL, "landmarks": data}
-        
+
         for photo in photos:
             # Read photo bytes
             photo_bytes = await photo.read()
@@ -170,6 +236,79 @@ async def generate_composite(
                 except Exception as e:
                     print(f"DEBUG: Face detection failed: {e}", flush=True)
                 print(f"PERF:   face total: {time.perf_counter() - t_step:.2f}s", flush=True)
+
+            elif processing_mode == "cartoon":
+                # 1. Remove background
+                t_step = time.perf_counter()
+                sticker_image = await rembg_service.remove_background(photo_bytes)
+                print(f"PERF:   rembg:     {time.perf_counter() - t_step:.2f}s", flush=True)
+
+                # 2. Crop to alpha bbox
+                anchor_mode = getattr(template_meta, 'anchor_mode', 'bbox_center')
+                sticker_image = compose_service.crop_to_alpha_bbox(sticker_image, anchor_mode=anchor_mode)
+
+                # 3. Face detection — only needed to re-frame. When the guest lined
+                #    themselves up against the live triangle guide their framing is
+                #    already correct, so we skip detection entirely and save the time.
+                if not guest_framed:
+                    t_step = time.perf_counter()
+                    try:
+                        landmarks = face_service.detect_landmarks(sticker_image)
+                    except Exception as e:
+                        print(f"DEBUG: Face detection failed: {e}", flush=True)
+                        landmarks = None
+                    print(f"PERF:   face:      {time.perf_counter() - t_step:.2f}s "
+                          f"({'found' if landmarks else 'none — using fallback framing'})", flush=True)
+
+                # 4. Duotone map — the portrait keeps its tones but is recoloured
+                #    onto the theme's ramp. Rendered at canvas height (never
+                #    upscaled) so it stays sharp when mapped 1:1 onto the output.
+                t_step = time.perf_counter()
+                sticker_image = duotone_preset(
+                    sticker_image,
+                    preset=cartoon_preset,
+                    theme=cartoon_theme,
+                    landmarks=landmarks,
+                    auto_crop=not guest_framed,
+                    render_height=(template_meta.height or RENDER_HEIGHT),
+                )
+                print(f"PERF:   duotone:   {time.perf_counter() - t_step:.2f}s "
+                      f"(preset={cartoon_preset}, theme={cartoon_theme})", flush=True)
+
+            elif processing_mode == "watercolor":
+                # 1. Remove background
+                t_step = time.perf_counter()
+                sticker_image = await rembg_service.remove_background(photo_bytes)
+                print(f"PERF:   rembg:     {time.perf_counter() - t_step:.2f}s", flush=True)
+
+                # 2. Trim to the subject
+                anchor_mode = getattr(template_meta, 'anchor_mode', 'bbox_center')
+                sticker_image = compose_service.crop_to_alpha_bbox(sticker_image, anchor_mode=anchor_mode)
+
+                # 3. Face detection only when we need to re-frame — the guest who
+                #    lined up against the live triangle guide already framed it.
+                if not guest_framed:
+                    t_step = time.perf_counter()
+                    try:
+                        landmarks = face_service.detect_landmarks(sticker_image)
+                    except Exception as e:
+                        print(f"DEBUG: Face detection failed: {e}", flush=True)
+                    print(f"PERF:   face:      {time.perf_counter() - t_step:.2f}s", flush=True)
+
+                # 4. Illustrated render. The semantic parse happens inside, on the
+                #    cutout, so background people the guest happened to stand in
+                #    front of are already gone and cannot be parsed as the subject.
+                t_step = time.perf_counter()
+                sticker_image = render_watercolor(
+                    sticker_image,
+                    preset=watercolor_preset,
+                    theme=cartoon_theme,
+                    landmarks=landmarks,
+                    auto_crop=not guest_framed,
+                    render_height=(template_meta.height or WC_RENDER_HEIGHT),
+                )
+                print(f"PERF:   watercolor:{time.perf_counter() - t_step:.2f}s "
+                      f"(preset={watercolor_preset}, theme={cartoon_theme})", flush=True)
 
             elif processing_mode == "pre_extracted":
                 # Image is already a transparent PNG from /api/extract
@@ -222,19 +361,59 @@ async def generate_composite(
         template_path = os.path.join(TEMPLATES_DIR, template_meta.png_path) if template_meta.png_path else None
         fg_template_path = os.path.join(TEMPLATES_DIR, template_meta.fg_path) if template_meta.fg_path else None
 
-        # All modes (sticker, frame, pre_extracted, magazine) now use the same robust composition service
-        final_image = compose_service.compose_final(
-            template_path=template_path,
-            stickers=processed_stickers,
-            template_meta=template_meta,
-            processing_mode=processing_mode,
-            user_position=user_position,
-            fg_template_path=fg_template_path,
-            magazine_name=magazine_name,
-            magazine_designation=magazine_designation,
-            overlay_name=overlay_name,
-            overlay_designation=overlay_designation,
-        )
+        if processing_mode in ART_MODES:
+            # Cartoon and watercolor share one composition: themed backdrop, the
+            # stylised portrait, then the pre-keyed frame PNG on top as a matte.
+            # They differ only in how the portrait was rendered and, for
+            # watercolor, in the backdrop being a plexus field rather than a fill.
+            cartoon_subject = processed_stickers[0]["image"] if processed_stickers else None
+            if cartoon_subject is None:
+                raise HTTPException(status_code=400, detail=f"No photo provided for {processing_mode} mode")
+            tri = raw_template_cfg.get("triangle", {}) or {}
+            palette = get_theme(cartoon_theme)
+
+            canvas_w = template_meta.width or 1080
+            canvas_h = template_meta.height or 1350
+            plexus_bg = None
+            if processing_mode == "watercolor" and raw_template_cfg.get("plexusBackground", True):
+                # Cached on (size, theme), so this is generated once per template
+                # per process rather than per guest.
+                plexus_bg = Image.fromarray(generate_plexus(canvas_w, canvas_h, cartoon_theme))
+            # The theme owns backdrop + stroke so portrait, frame and background
+            # stay in one hue family. A template may still pin an explicit stroke
+            # colour, which wins over the theme's.
+            final_image = compose_duotone_artwork(
+                cartoon_subject,
+                canvas_width=canvas_w,
+                canvas_height=canvas_h,
+                bg_color=palette["backdrop"],
+                backdrop_image=plexus_bg,
+                triangle_color=_hex_to_rgb(tri.get("color", ""), palette["triangle"]),
+                apex_y_ratio=float(tri.get("apexYRatio", 0.10)),
+                base_y_ratio=float(tri.get("baseYRatio", 0.90)),
+                base_width_ratio=float(tri.get("baseWidthRatio", 0.92)),
+                line_width=int(tri.get("lineWidth", 11)),
+                glow_radius=int(tri.get("glowRadius", 34)),
+                # The template PNG is a pre-keyed matte here, not a thumbnail: it
+                # clips the portrait to the triangle and is the same file the
+                # capture preview overlays, so preview and artwork cannot drift.
+                frame_path=template_path,
+                fit="frame" if guest_framed else "portrait",
+            )
+        else:
+            # All other modes (sticker, frame, pre_extracted, magazine) use the standard composition service
+            final_image = compose_service.compose_final(
+                template_path=template_path,
+                stickers=processed_stickers,
+                template_meta=template_meta,
+                processing_mode=processing_mode,
+                user_position=user_position,
+                fg_template_path=fg_template_path,
+                magazine_name=magazine_name,
+                magazine_designation=magazine_designation,
+                overlay_name=overlay_name,
+                overlay_designation=overlay_designation,
+            )
         print(f"PERF:   compose:   {time.perf_counter() - t_step:.2f}s", flush=True)
         
         # Save via StorageService — encode immediately, defer S3 upload

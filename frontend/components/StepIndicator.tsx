@@ -8,6 +8,7 @@
  */
 
 import styles from './StepIndicator.module.css';
+import type { ProcessingMode } from '@/types/processingMode';
 
 const STEPS_DEFAULT = [
   { label: 'Mode', icon: '🎨' },
@@ -34,7 +35,7 @@ const STEPS_MAGAZINE = [
 
 interface StepIndicatorProps {
   currentStep: number; // 1-based
-  processingMode?: 'frame' | 'sticker' | 'word_template' | 'magazine';
+  processingMode?: ProcessingMode;
 }
 
 export default function StepIndicator({ currentStep, processingMode }: StepIndicatorProps) {

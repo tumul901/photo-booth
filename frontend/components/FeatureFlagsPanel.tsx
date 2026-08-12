@@ -14,12 +14,13 @@
 
 import { useEffect, useState } from 'react';
 import styles from './FeatureFlagsPanel.module.css';
+import type { ProcessingMode } from '@/types/processingMode';
 
 interface FeatureFlagsPanelProps {
   apiBaseUrl: string;
 }
 
-type Mode = 'frame' | 'sticker' | 'word_template' | 'magazine';
+type Mode = ProcessingMode;
 
 interface Flags {
   modes: Record<Mode, boolean>;
@@ -36,6 +37,8 @@ const MODE_LABELS: Array<{ key: Mode; label: string; hint: string }> = [
   { key: 'sticker', label: 'Sticker Mode', hint: 'Remove background, place on template' },
   { key: 'word_template', label: 'Word Template (WTM)', hint: 'Doodle template + selectable words' },
   { key: 'magazine', label: 'Magazine Cover', hint: 'BG → user cutout → FG sandwich' },
+  { key: 'cartoon', label: 'Cartoon Artwork', hint: 'Duotone portrait inside a neon triangle' },
+  { key: 'watercolor', label: 'Watercolor Filter', hint: 'Flat-shaded illustrated portrait, drawn outlines' },
 ];
 
 const PROFILE_DETAIL: Record<string, { label: string; desc: string }> = {

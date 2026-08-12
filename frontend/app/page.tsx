@@ -11,6 +11,7 @@
  */
 
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { type ProcessingMode, isArtworkMode } from '@/types/processingMode';
 import StepIndicator from '../components/StepIndicator';
 import ModeSelectScreen from '../components/screens/StartScreen';
 import TemplateScreen from '../components/screens/TemplateScreen';
@@ -93,7 +94,7 @@ interface ResultData {
   printHeightMm?: number;
 }
 
-type ProcessingMode = 'frame' | 'sticker' | 'word_template' | 'magazine';
+// ProcessingMode now lives in types/processingMode.ts — see the note there.
 
 // ─── Main Component ──────────────────────────────────────────────────
 
@@ -432,7 +433,15 @@ export default function BoothPage() {
     // (capture → BG removal → adjust → result). The editor handles extraction.
     // Magazine uses a different FG-overlay composite and is excluded (same as the
     // post-result adjust button below).
-    if (config.allowManualPositioning && !isMagazineTemplate && processingMode !== 'magazine') {
+    // Artwork modes are excluded by design: the guest already framed themselves
+    // against the live triangle guide, so a placement editor would only let them
+    // undo that. Magazine uses a different FG-overlay composite.
+    if (
+      config.allowManualPositioning &&
+      !isMagazineTemplate &&
+      processingMode !== 'magazine' &&
+      !isArtworkMode(processingMode)
+    ) {
       setIsEditing(true);
       return;
     }
@@ -613,7 +622,8 @@ export default function BoothPage() {
             result={result}
             onStartOver={handleStartOver}
             onAdjustPlacement={
-              rawImage && templateConfig && processingMode !== 'magazine'
+              rawImage && templateConfig
+                && processingMode !== 'magazine' && !isArtworkMode(processingMode)
                 ? () => setIsEditing(true)
                 : undefined
             }
