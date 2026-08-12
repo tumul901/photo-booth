@@ -167,16 +167,28 @@ if p2 is not None and p2.landmarks is not None:
         delta = float(np.abs(rendered[area] - base[area]).mean()) if area.any() else 0.0
         check(f"{label} redrawn", delta > 8.0, f"mean change {delta:.1f} inside the polygon")
 
-    # Sclera must be brighter than the surrounding skin, or the eye reads as a hole
+    # The eye must show sclera rather than rendering as a dark blob.
+    #
+    # Measured as the SHARE of eye pixels brighter than the surrounding skin, not
+    # as the region's mean. The mean is the wrong statistic: a correctly drawn
+    # eye is mostly iris, pupil and lid line, so its average sits BELOW skin even
+    # on renders that look right (measured: mean 75 vs skin 92 on a 69px eye that
+    # reads perfectly). Asserting on the mean fails good output and would have
+    # sent someone chasing a bug that was not there.
     eye = p2.points(RIGHT_EYE)
     m = np.zeros(rendered.shape[:2], np.uint8)
     cv2.fillPoly(m, [eye], 255)
     ring = cv2.dilate(m, np.ones((21, 21), np.uint8)) & ~m
     if (m > 0).any() and (ring > 0).any():
-        inside = rendered[m > 0].mean()
-        around = rendered[ring > 0].mean()
-        check("eye reads lighter than surrounding skin", inside > around,
-              f"eye={inside:.0f} vs skin={around:.0f}")
+        lum = np.array(art.convert("L")).astype(np.float32)
+        skin = float(lum[ring > 0].mean())
+        eye_px = lum[m > 0]
+        bright = float((eye_px > skin).mean() * 100)
+        peak = float(np.percentile(eye_px, 90))
+        check("sclera is visible (eye is not a dark blob)", bright >= 10.0,
+              f"{bright:.0f}% of the eye brighter than skin (>= 10% expected)")
+        check("sclera is genuinely bright", peak > skin + 20,
+              f"eye p90={peak:.0f} vs skin={skin:.0f}")
 else:
     check("features verifiable", False, "no landmarks on the rendered art")
 

@@ -536,12 +536,19 @@ def draw_features(
         return drawn
 
     h, w = canvas.shape[:2]
-    unit = max(h, w) / 1000.0
-    lw = max(1, int(round(2.4 * unit * line_scale)))
-    thin = max(1, int(round(1.6 * unit * line_scale)))
-
     oval = parse.points(FACE_OVAL)
     face_h = float(oval[:, 1].max() - oval[:, 1].min()) if oval is not None else h * 0.4
+
+    # Line weight scales to the FACE, not the canvas — the way an illustrator
+    # scales a pen to the subject rather than to the paper. Canvas-relative
+    # weights are fine when the guest fills the frame, but on a wide shot where
+    # the head is a small part of the picture they put a 3px lid line on an 8px
+    # eye: the sclera is entirely covered and the eye renders as a dark blob,
+    # which is worse than leaving the photographic detail alone. 400px of face
+    # is the reference size at which the coefficients below were tuned.
+    unit = max(face_h, 1.0) / 400.0
+    lw = max(1, int(round(2.4 * unit * line_scale)))
+    thin = max(1, int(round(1.6 * unit * line_scale)))
 
     # ── Eyes ──
     for eye_ids, iris_ids, iris_c in (
@@ -552,7 +559,10 @@ def draw_features(
         if eye is None or len(eye) < 6:
             continue
         eye_w = float(eye[:, 0].max() - eye[:, 0].min())
-        if eye_w < 6:
+        # Below this there is no room for sclera, iris, pupil and a lid line to
+        # coexist even at 1px, and the drawn eye is strictly worse than the
+        # flattened photographic detail underneath it. Leave it alone.
+        if eye_w < 10:
             continue
 
         eye_mask = np.zeros((h, w), np.uint8)
