@@ -1,0 +1,27 @@
+{
+  "templateId": "cartoon-square",
+  "name": "Cartoon Triangle — Square",
+  "pngUrl": "cartoon-frame-square.png",
+  "templateType": "cartoon",
+  "anchorMode": "full_frame",
+  "showVisualGuide": true,
+  "frameOverlay": true,
+  "allowManualPositioning": false,
+  "dimensions": {
+    "width": 1080,
+    "height": 1080
+  },
+  "captureAspect": "1:1",
+  "theme": "orange",
+  "slots": [
+    {
+      "id": "main",
+      "x": 0,
+      "y": 0,
+      "width": 1080,
+      "height": 1080,
+      "zIndex": 0
+    }
+  ],
+  "description": "Square canvas. Triangle fills 81% of width, 70% of height — tight and balanced. The PNG is a pre-keyed matte with a transparent triangle: it is overlaid on the live camera AND on the artwork, so preview and output are identical."
+}

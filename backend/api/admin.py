@@ -520,6 +520,22 @@ async def get_template_config(template_id: str):
                     img_path = os.path.join(TEMPLATES_DIR, png_file)
                     if os.path.exists(img_path):
                         meta["_pngTransparentPct"] = _png_transparent_pct(img_path, os.path.getmtime(img_path))
+
+                    # Resolve the colour theme so the booth's capture guide can draw
+                    # the frame in the same colour the render will use. The theme is
+                    # the single source of truth — templates declare `theme`, not raw
+                    # colours, so a guide can never disagree with its artwork.
+                    if meta.get("theme"):
+                        try:
+                            from services.cartoon_service import get_theme
+                            palette = get_theme(meta["theme"])
+                            meta["_themeColors"] = {
+                                key: "#%02X%02X%02X" % palette[key]
+                                for key in ("backdrop", "accent", "triangle")
+                            }
+                        except Exception as e:
+                            print(f"WARNING: theme resolve failed for {template_id}: {e}", flush=True)
+
                     return meta
         except:
             continue

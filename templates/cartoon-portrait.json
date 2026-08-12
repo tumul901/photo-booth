@@ -1,0 +1,27 @@
+{
+  "templateId": "cartoon-portrait",
+  "name": "Cartoon Triangle — Portrait 4:5",
+  "pngUrl": "cartoon-frame-portrait.png",
+  "templateType": "cartoon",
+  "anchorMode": "full_frame",
+  "showVisualGuide": true,
+  "frameOverlay": true,
+  "allowManualPositioning": false,
+  "dimensions": {
+    "width": 1080,
+    "height": 1350
+  },
+  "captureAspect": "4:5",
+  "theme": "orange",
+  "slots": [
+    {
+      "id": "main",
+      "x": 0,
+      "y": 0,
+      "width": 1080,
+      "height": 1350,
+      "zIndex": 0
+    }
+  ],
+  "description": "Portrait print format. Square frame centred on a taller backdrop, so the triangle spans 81% of width but only 56% of height, leaving bands above and below."
+}

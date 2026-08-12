@@ -1,0 +1,27 @@
+{
+  "templateId": "cartoon-wide",
+  "name": "Cartoon Triangle — Wide 16:9",
+  "pngUrl": "cartoon-frame-wide.png",
+  "templateType": "cartoon",
+  "anchorMode": "full_frame",
+  "showVisualGuide": true,
+  "frameOverlay": true,
+  "allowManualPositioning": false,
+  "dimensions": {
+    "width": 1920,
+    "height": 1072
+  },
+  "captureAspect": "16:9",
+  "theme": "orange",
+  "slots": [
+    {
+      "id": "main",
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 1072,
+      "zIndex": 0
+    }
+  ],
+  "description": "The frame exactly as generated, uncropped. Triangle spans 45% of width, 70% of height, leaving wide dark margins either side."
+}
