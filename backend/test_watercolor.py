@@ -297,7 +297,39 @@ for fname, (fw, fh) in FRAMES.items():
     check(f"{fname} shows the subject inside", leaked[window].mean() > 0.8,
           f"{leaked[window].mean() * 100:.0f}% filled")
 
-print("\n10. Consistency across varied real faces")
+print("\n10. Transparent output keeps alpha where an animation shows through")
+# The artwork modes exist to be layered over video, so the triangle interior the
+# subject does not cover must be genuinely clear. Two separate things can quietly
+# destroy this: the compositor flattening to RGB, and the storage layer pasting
+# RGBA onto white before encoding JPEG. Both did, at one point.
+fpath = "../templates/cartoon-frame-square.png"
+if os.path.exists(fpath):
+    subj = watercolor_preset(cut, landmarks=None, auto_crop=False, render_height=1080)
+    clear = compose_duotone_artwork(
+        subj, canvas_width=1080, canvas_height=1080,
+        frame_path=os.path.abspath(fpath), fit="frame", transparent=True,
+    )
+    check("transparent compose returns RGBA", clear.mode == "RGBA", f"mode={clear.mode}")
+
+    a = np.array(clear.getchannel("A"))
+    window = np.array(Image.open(fpath).convert("RGBA").getchannel("A")) < 128
+    inside_clear = float((a[window] == 0).mean() * 100)
+    outside_opaque = float((a[~window] > 200).mean() * 100)
+    check("triangle interior has clear pixels", inside_clear > 0.5,
+          f"{inside_clear:.1f}% of the window fully transparent")
+    check("frame art outside stays opaque", outside_opaque > 95.0,
+          f"{outside_opaque:.1f}% opaque")
+
+    # Opaque compose must NOT gain alpha — every other mode depends on RGB.
+    solid = compose_duotone_artwork(
+        subj, canvas_width=1080, canvas_height=1080,
+        frame_path=os.path.abspath(fpath), fit="frame",
+    )
+    check("opaque compose still returns RGB", solid.mode == "RGB", f"mode={solid.mode}")
+else:
+    check("frame available for transparency test", False, "missing")
+
+print("\n11. Consistency across varied real faces")
 # The single biggest risk for an event is not one bad render but a mode that
 # flatters some guests and mangles others, so this runs the full pipeline over
 # every varied face available rather than proving the happy path once.

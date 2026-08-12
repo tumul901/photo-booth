@@ -109,6 +109,12 @@ class GenerateResponse(BaseModel):
     output_id: Optional[str] = None
     error: Optional[str] = None
     processing_mode_used: Optional[str] = None
+    # Actual encoding of the saved file. The booth previously hard-coded a .png
+    # filename on every download regardless of what was really saved, so guests
+    # received JPEGs named .png. The UI also needs to know when an output carries
+    # real transparency, since that is the whole point of the artwork modes.
+    output_format: Optional[str] = None
+    transparent: Optional[bool] = None
 
 
 @router.post("/generate", response_model=GenerateResponse)
@@ -374,8 +380,16 @@ async def generate_composite(
 
             canvas_w = template_meta.width or 1080
             canvas_h = template_meta.height or 1350
+
+            # Transparent artwork: everything the subject does not cover inside
+            # the triangle is left clear, so the PNG can be laid over video or an
+            # animated background. Mutually exclusive with a generated backdrop —
+            # a plexus field IS a background, and drawing one then asking for
+            # transparency would just make the transparency unreachable.
+            transparent = bool(raw_template_cfg.get("transparentBackground", False))
             plexus_bg = None
-            if processing_mode == "watercolor" and raw_template_cfg.get("plexusBackground", True):
+            if (processing_mode == "watercolor" and not transparent
+                    and raw_template_cfg.get("plexusBackground", False)):
                 # Cached on (size, theme), so this is generated once per template
                 # per process rather than per guest.
                 plexus_bg = Image.fromarray(generate_plexus(canvas_w, canvas_h, cartoon_theme))
@@ -388,6 +402,7 @@ async def generate_composite(
                 canvas_height=canvas_h,
                 bg_color=palette["backdrop"],
                 backdrop_image=plexus_bg,
+                transparent=transparent,
                 triangle_color=_hex_to_rgb(tri.get("color", ""), palette["triangle"]),
                 apex_y_ratio=float(tri.get("apexYRatio", 0.10)),
                 base_y_ratio=float(tri.get("baseYRatio", 0.90)),
@@ -460,6 +475,9 @@ async def generate_composite(
             download_url=result.download_url,
             error=None,
             processing_mode_used=processing_mode,
+            output_format=("png" if str(getattr(template_meta, "output_format", "")).lower() == "png"
+                           else "jpg"),
+            transparent=bool(final_image.mode == "RGBA"),
         )
         
     except Exception as e:
@@ -559,11 +577,19 @@ async def download_output(output_id: str, source: Optional[str] = None):
     if image_bytes is None:
         raise HTTPException(status_code=404, detail="Output not found")
 
+    # Sniff the real encoding rather than assuming JPEG. An artwork PNG served
+    # with image/jpeg and a .jpg filename is a corrupt download for the guest,
+    # and silently loses exactly the transparency the mode exists to produce.
+    is_png = image_bytes[:8] == b"\x89PNG\r\n\x1a\n"
+    is_webp = image_bytes[:4] == b"RIFF" and image_bytes[8:12] == b"WEBP"
+    ext = "png" if is_png else ("webp" if is_webp else "jpg")
+    media = {"png": "image/png", "webp": "image/webp", "jpg": "image/jpeg"}[ext]
+
     return Response(
         content=image_bytes,
-        media_type="image/jpeg",
+        media_type=media,
         headers={
-            "Content-Disposition": f'attachment; filename="photobooth-{output_id}.jpg"',
+            "Content-Disposition": f'attachment; filename="photobooth-{output_id}.{ext}"',
             "Cache-Control": "public, max-age=31536000, immutable"
         },
     )

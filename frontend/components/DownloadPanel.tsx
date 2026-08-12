@@ -18,6 +18,10 @@ interface DownloadPanelProps {
   isReady: boolean;
   printWidthMm?: number;
   printHeightMm?: number;
+  /** Real encoding of the saved file — "png" | "jpg". */
+  outputFormat?: string | null;
+  /** True when the output carries real alpha (artwork modes). */
+  transparent?: boolean | null;
 }
 
 export default function DownloadPanel({
@@ -27,6 +31,8 @@ export default function DownloadPanel({
   isReady,
   printWidthMm,
   printHeightMm,
+  outputFormat,
+  transparent,
 }: DownloadPanelProps) {
   const [canShare, setCanShare] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -43,21 +49,30 @@ export default function DownloadPanel({
     setTimeout(() => setToastMessage(null), 3000);
   }, []);
 
+  // The extension has to match what the server actually saved. This was
+  // hard-coded to .png for every mode, so guests received JPEGs named .png —
+  // which some phone galleries refuse to open.
+  const ext = (outputFormat || 'jpg').toLowerCase() === 'png' ? 'png' : 'jpg';
+
   const handleDownload = useCallback(() => {
     if (!downloadUrl) return;
 
     try {
       const link = document.createElement('a');
       link.href = downloadUrl;
-      link.download = `photobooth-${outputId || 'photo'}.png`;
+      link.download = `photobooth-${outputId || 'photo'}.${ext}`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      showToast('Download started! 📥');
+      showToast(
+        transparent
+          ? 'Transparent PNG downloading 📥'
+          : 'Download started! 📥'
+      );
     } catch (err) {
       console.error('Download failed:', err);
     }
-  }, [downloadUrl, outputId, showToast]);
+  }, [downloadUrl, outputId, ext, transparent, showToast]);
 
   const handleShare = useCallback(async () => {
     if (!shareUrl) return;
@@ -127,18 +142,24 @@ export default function DownloadPanel({
           disabled={!downloadUrl}
         >
           <span className={styles.actionIcon}>⬇️</span>
-          <span className={styles.actionLabel}>Download</span>
+          <span className={styles.actionLabel}>
+            {transparent ? 'Download PNG' : 'Download'}
+          </span>
         </button>
 
-        {/* Print */}
-        <button
-          className={styles.actionButton}
-          onClick={handlePrint}
-          disabled={!downloadUrl}
-        >
-          <span className={styles.actionIcon}>🖨️</span>
-          <span className={styles.actionLabel}>Print</span>
-        </button>
+        {/* Print — hidden for transparent artwork. Printing alpha flattens it
+            onto white, which fills the triangle with a white block and looks
+            like a broken render rather than the intended cut-out. */}
+        {!transparent && (
+          <button
+            className={styles.actionButton}
+            onClick={handlePrint}
+            disabled={!downloadUrl}
+          >
+            <span className={styles.actionIcon}>🖨️</span>
+            <span className={styles.actionLabel}>Print</span>
+          </button>
+        )}
 
         {/* Share / Copy Link */}
         <button
@@ -150,6 +171,13 @@ export default function DownloadPanel({
           <span className={styles.actionLabel}>{canShare ? 'Share' : 'Copy Link'}</span>
         </button>
       </div>
+
+      {transparent && (
+        <p className={styles.qrLabel}>
+          Transparent PNG — the area inside the triangle is see-through, ready to
+          drop over video or an animated background.
+        </p>
+      )}
 
       {/* QR Code */}
       {shareUrl && (

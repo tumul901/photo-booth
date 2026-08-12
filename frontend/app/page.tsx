@@ -92,6 +92,10 @@ interface ResultData {
   shareUrl: string;
   printWidthMm?: number;
   printHeightMm?: number;
+  /** Real encoding the backend saved — the download filename must match it. */
+  outputFormat?: string;
+  /** True when the artwork carries alpha (transparent inside the triangle). */
+  transparent?: boolean;
 }
 
 // ProcessingMode now lives in types/processingMode.ts — see the note there.
@@ -350,6 +354,8 @@ export default function BoothPage() {
         shareUrl: data.output_url,
         printWidthMm: templatePrintWidthMm,
         printHeightMm: templatePrintHeightMm,
+        outputFormat: data.output_format,
+        transparent: data.transparent,
       };
 
       setResult(resultData);

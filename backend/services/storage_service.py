@@ -177,20 +177,27 @@ class LocalStorageProvider(StorageProvider):
                 filepath = os.path.join(self.output_dir, f"{output_id}.{file_ext}")
                 save_image.save(filepath, format="JPEG", **kwargs)
         else:
-            file_ext = "jpg" if format.upper() == "JPEG" else format.lower()
+            # See the S3 provider: a template asking for PNG must get PNG here
+            # too, or a transparent artwork is flattened onto white on the way
+            # out and the alpha it was built for never reaches the file.
+            fmt_name = format.upper()
+            if str(output_format).lower() in ("png", "webp"):
+                fmt_name = str(output_format).upper()
+
+            file_ext = "jpg" if fmt_name == "JPEG" else fmt_name.lower()
             filepath = os.path.join(self.output_dir, f"{output_id}.{file_ext}")
-            if format.upper() == "JPEG" and save_image.mode == "RGBA":
+            if fmt_name == "JPEG" and save_image.mode == "RGBA":
                 bg = Image.new("RGB", save_image.size, (255, 255, 255))
                 bg.paste(save_image, mask=save_image.split()[3])
                 save_image = bg
             save_image = resize_image_for_web(save_image)
             t = time.perf_counter()
-            if format.upper() == "JPEG":
+            if fmt_name == "JPEG":
                 save_image.save(filepath, format="JPEG", quality=quality, progressive=True)
-            elif format.upper() == "WEBP":
+            elif fmt_name == "WEBP":
                 save_image.save(filepath, format="WEBP", quality=quality, method=4)
             else:
-                save_image.save(filepath, format=format)
+                save_image.save(filepath, format=fmt_name)
 
         print(f"PERF:     encode:  {time.perf_counter() - t:.2f}s ({file_ext}, {os.path.getsize(filepath) / 1024:.0f}KB)", flush=True)
 
@@ -326,15 +333,24 @@ class S3StorageProvider(StorageProvider):
                 if dpi:
                     kwargs["dpi"] = dpi
         else:
-            file_ext = "jpg" if format.upper() == "JPEG" else format.lower()
-            if format.upper() == "JPEG" and save_image.mode == "RGBA":
+            # A template asking for PNG gets PNG even outside print mode.
+            # Previously output_format was only consulted under print_mode, so a
+            # transparent artwork template silently had its alpha flattened onto
+            # white and encoded as JPEG — the transparency was requested, built,
+            # and then thrown away at the last step.
+            fmt_name = format.upper()
+            if str(output_format).lower() in ("png", "webp"):
+                fmt_name = str(output_format).upper()
+
+            file_ext = "jpg" if fmt_name == "JPEG" else fmt_name.lower()
+            if fmt_name == "JPEG" and save_image.mode == "RGBA":
                 bg = Image.new("RGB", save_image.size, (255, 255, 255))
                 bg.paste(save_image, mask=save_image.split()[3])
                 save_image = bg
             save_image = resize_image_for_web(save_image)
-            if format.upper() == "JPEG":
+            if fmt_name == "JPEG":
                 kwargs = {"quality": quality, "progressive": True}
-            elif format.upper() == "WEBP":
+            elif fmt_name == "WEBP":
                 kwargs = {"quality": quality, "method": 4}
             else:
                 kwargs = {}

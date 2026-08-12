@@ -160,6 +160,7 @@ def compose_duotone_artwork(
     frame_path: str | None = None,
     match_frame_backdrop: bool = True,
     backdrop_image: Image.Image | None = None,
+    transparent: bool = False,
     fit: str = "frame",
     subject_height_ratio: float = 0.80,
     subject_center_y_ratio: float = 0.56,
@@ -201,7 +202,15 @@ def compose_duotone_artwork(
         if sampled is not None:
             bg_color = sampled
 
-    if backdrop_image is not None:
+    if transparent:
+        # Leave everything behind the subject clear, so the artwork can be
+        # exported as a PNG and dropped over video or an animated background.
+        # The frame still composites last and is still opaque outside its
+        # window, so what ends up transparent is exactly the triangle interior
+        # that the subject does not cover — which is the area an animation is
+        # meant to show through.
+        canvas = Image.new("RGBA", (canvas_width, canvas_height), (0, 0, 0, 0))
+    elif backdrop_image is not None:
         # Watercolor mode supplies a rendered plexus field here. It replaces only
         # the flat fill; the frame still composites last and still clips
         # everything to the triangle, so the matte guarantees are unchanged.
@@ -258,4 +267,7 @@ def compose_duotone_artwork(
     if frame is not None:
         canvas = Image.alpha_composite(canvas, frame)
 
-    return canvas.convert("RGB")
+    # RGBA only when transparency was asked for. Everything downstream (print,
+    # social wall, gallery thumbnails) assumes RGB, so flattening stays the
+    # default and alpha is opt-in per template.
+    return canvas if transparent else canvas.convert("RGB")

@@ -13,7 +13,8 @@
   },
   "captureAspect": "1:1",
   "theme": "orange",
-  "plexusBackground": true,
+  "transparentBackground": true,
+  "output_format": "png",
   "slots": [
     {
       "id": "main",
@@ -24,5 +25,5 @@
       "zIndex": 0
     }
   ],
-  "description": "Illustrated flat-shaded portrait. Square canvas. Triangle fills 81% of width, 70% of height. Shares the cartoon mode's keyed triangle matte, so the capture guide is identical."
+  "description": "Illustrated flat-shaded portrait. Square canvas. Triangle fills 81% of width, 70% of height. Renders on transparency: everything inside the triangle the subject does not cover is clear, so the PNG can be laid over video or an animated background. Shares the cartoon mode's keyed triangle matte, so the capture guide is identical."
 }

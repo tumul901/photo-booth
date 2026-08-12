@@ -16,6 +16,8 @@ interface ResultScreenProps {
     shareUrl: string;
     printWidthMm?: number;
     printHeightMm?: number;
+    outputFormat?: string;
+    transparent?: boolean;
   };
   onStartOver: () => void;
   onAdjustPlacement?: () => void;
@@ -43,6 +45,8 @@ export default function ResultScreen({ result, onStartOver, onAdjustPlacement }:
               isReady={true}
               printWidthMm={result.printWidthMm}
               printHeightMm={result.printHeightMm}
+              outputFormat={result.outputFormat}
+              transparent={result.transparent}
             />
           </div>
 
