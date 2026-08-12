@@ -80,15 +80,15 @@ REGION_SPEC: dict[int, dict] = {
     FACE_SKIN: {"levels": 6,
                 "val": (0.64, 0.77, 0.87, 0.96, 1.06, 1.17),
                 "sat": (1.14, 1.08, 1.03, 1.00, 0.94, 0.84),
-                "v_range": (0.44, 0.90), "s_range": (0.20, 0.52)},
+                "v_range": (0.46, 0.90), "s_range": (0.30, 0.60)},
     BODY_SKIN: {"levels": 5,
                 "val": (0.68, 0.82, 0.93, 1.03, 1.14),
                 "sat": (1.12, 1.06, 1.00, 0.95, 0.87),
-                "v_range": (0.42, 0.90), "s_range": (0.18, 0.52)},
+                "v_range": (0.44, 0.90), "s_range": (0.28, 0.60)},
     HAIR:      {"levels": 4,
                 "val": (0.56, 0.82, 1.06, 1.34),
                 "sat": (1.08, 1.00, 0.93, 0.83),
-                "v_range": (0.16, 0.80), "s_range": (0.05, 0.58)},
+                "v_range": (0.12, 0.72), "s_range": (0.05, 0.58)},
     CLOTHES:   {"levels": 4,
                 "val": (0.63, 0.86, 1.06, 1.26),
                 "sat": (1.08, 1.00, 0.95, 0.87),
@@ -122,9 +122,9 @@ PRESETS: dict[str, dict] = {
     # stylised second.
     "wc_natural": {
         "presmooth": 1, "bilateral_sigma": 32.0, "clahe_clip": 0.6,
-        "band_sigma": 0.022, "band_smooth": 0.7, "line_scale": 0.55,
-        "grade": 0.05, "level_bias": 0.02, "rim": 0.18,
-        "feature_strength": 0.55,
+        "band_sigma": 0.028, "band_smooth": 0.7, "line_scale": 1.15,
+        "grade": 0.06, "level_bias": 0.02, "rim": 0.30,
+        "feature_strength": 0.80,
     },
     "wc_soft": {
         "presmooth": 2, "bilateral_sigma": 45.0, "clahe_clip": 0.8,
@@ -321,11 +321,16 @@ def flatten_regions(
     band_smooth: float = 1.0,
     level_bias: float = 0.0,
     work_max: int = 720,
-) -> tuple[np.ndarray, dict[int, np.ndarray]]:
+) -> tuple[np.ndarray, dict[int, np.ndarray], dict[int, np.ndarray]]:
     """
     Reduce each semantic region to a few flat tones sampled from that region.
 
-    Returns (flattened RGB, {class: boolean mask actually painted}).
+    Returns (flattened RGB, {class: painted mask}, {class: band index map}).
+
+    The band maps are returned rather than discarded because the boundaries
+    BETWEEN tonal steps are the lines a cel illustrator actually draws — the
+    terminator down a cheek, the edge of the shadow under a jaw. Without them
+    the result reads as a posterised photograph; with them it reads as drawn.
 
     Without a parse everything inside the alpha is treated as one region. That
     still yields a cel-shaded portrait — just without the hair/skin/clothing
@@ -389,6 +394,7 @@ def flatten_regions(
 
     out = np.zeros_like(rgb)
     painted: dict[int, np.ndarray] = {}
+    bands: dict[int, np.ndarray] = {}
 
     if labels_w is not None:
         regions = [(c, (labels_w == c) & subject) for c in PAINT_ORDER]
@@ -436,8 +442,9 @@ def flatten_regions(
 
         out[mask_full] = ramp[np.clip(idx_full[mask_full], 0, levels - 1)]
         painted[cls] = mask_full
+        bands[cls] = np.where(mask_full, idx_full, 255).astype(np.uint8)
 
-    return out, painted
+    return out, painted, bands
 
 
 def draw_outlines(
@@ -447,6 +454,7 @@ def draw_outlines(
     color: tuple[int, int, int],
     *,
     line_scale: float = 1.0,
+    bands: Optional[dict[int, np.ndarray]] = None,
 ) -> dict[str, int]:
     """
     Ink the drawing: outer silhouette heavy, internal region borders lighter.
@@ -460,7 +468,7 @@ def draw_outlines(
     outer_t = max(2, int(round(4.2 * unit * line_scale)))
     inner_t = max(1, int(round(2.6 * unit * line_scale)))
 
-    stats = {"silhouette": 0, "internal": 0}
+    stats = {"silhouette": 0, "internal": 0, "shading": 0}
     stats["silhouette"] = _trace(canvas, alpha > 128, color, outer_t,
                                  simplify=0.0016, smooth=3, min_area_frac=0.002)
 
@@ -480,6 +488,44 @@ def draw_outlines(
             continue
         stats["internal"] += _trace(canvas, m, color, inner_t,
                                     simplify=0.0030, smooth=2, min_area_frac=0.0006)
+
+    # Shading lines: the boundaries BETWEEN tonal bands.
+    #
+    # This is what separates a drawn illustration from a posterised photograph.
+    # An illustrator inks the terminator — the edge where light falls off down a
+    # cheek, under a jaw, along the side of a nose — and those edges are exactly
+    # the band boundaries the quantiser already computed. Region outlines alone
+    # gave seven contours for a whole portrait; the reference artwork has dozens.
+    #
+    # Drawn lighter and thinner than region borders, because they describe form
+    # rather than separating one thing from another.
+    if bands:
+        shade_t = max(1, int(round(1.5 * unit * line_scale)))
+        shade_col = tuple(int(round(c + (b - c) * 0.45))
+                          for c, b in zip(color, (150, 130, 120)))
+        for cls in (FACE_SKIN, BODY_SKIN, HAIR, CLOTHES):
+            bm = bands.get(cls)
+            if bm is None:
+                continue
+            valid = bm != 255
+            if valid.sum() < 512:
+                continue
+            top = int(bm[valid].max())
+            # Only the SHADOW TERMINATOR — the boundary where the darkest steps
+            # give way to lit ones. Inking every level boundary turns the face
+            # into a topographic contour map: an illustrator draws two or three
+            # confident lines per form, not one per tonal step. The area floor is
+            # deliberately high for the same reason; small band islands are
+            # incidental, and outlining them is what produces the scribble.
+            for lv in (1, 2):
+                if lv > top:
+                    break
+                layer = (valid & (bm >= lv))
+                if layer.sum() < 512:
+                    continue
+                stats["shading"] += _trace(canvas, layer, shade_col, shade_t,
+                                           simplify=0.0060, smooth=3,
+                                           min_area_frac=0.012)
     return stats
 
 
@@ -795,10 +841,23 @@ def watercolor_preset(
     if cropped.mode != "RGBA":
         cropped = cropped.convert("RGBA")
 
-    effective_h = min(render_height, cropped.height) if cropped.height > 0 else render_height
-    if effective_h != cropped.height and cropped.height > 0:
-        target_w = max(int(effective_h * cropped.width / max(cropped.height, 1)), 1)
-        scaled = cropped.resize((target_w, effective_h), Image.LANCZOS)
+    # Render AT the output size, enlarging the capture when it is smaller.
+    #
+    # The cartoon/line renderer deliberately refuses to upscale, because it finds
+    # edges with a GRADIENT operator and enlarging first interpolates away the
+    # very detail those edges come from. That reasoning does not transfer here:
+    # this renderer takes its edges from the semantic parse, and draws outlines
+    # and facial features as vector strokes. Drawing those at capture size and
+    # letting the compositor enlarge the result is what actually destroys them —
+    # a 576x720 booth capture on a 1080x1350 canvas means every line and every
+    # eye is drawn at 576 and then blown up 1.9x into mush.
+    #
+    # Band-finding still runs at its own capped working resolution inside
+    # flatten_regions, so this costs almost nothing: it buys crisp ink and crisp
+    # features, not a more expensive quantiser.
+    if cropped.height > 0 and cropped.height != render_height:
+        target_w = max(int(round(render_height * cropped.width / cropped.height)), 1)
+        scaled = cropped.resize((target_w, render_height), Image.LANCZOS)
     else:
         scaled = cropped
 
@@ -811,7 +870,7 @@ def watercolor_preset(
     parse_ms = (time.perf_counter() - t_parse) * 1000
 
     t_flat = time.perf_counter()
-    flat, painted = flatten_regions(rgb, parse, alpha, theme=theme, grade=grade, **params)
+    flat, painted, bands = flatten_regions(rgb, parse, alpha, theme=theme, grade=grade, **params)
     flat_ms = (time.perf_counter() - t_flat) * 1000
 
     subject = alpha > 100
@@ -822,7 +881,7 @@ def watercolor_preset(
 
     t_ink = time.perf_counter()
     ink = _line_color(theme)
-    stats = draw_outlines(flat, painted, alpha, ink, line_scale=line_scale)
+    stats = draw_outlines(flat, painted, alpha, ink, line_scale=line_scale, bands=bands)
     # Features last so lids and lips sit on top of the region outlines rather
     # than being crossed by them.
     feats = draw_features(flat, rgb, parse, ink, line_scale=line_scale,
@@ -842,7 +901,7 @@ def watercolor_preset(
         f"total={(time.perf_counter() - t0) * 1000:.0f}ms "
         f"in={img.width}x{img.height} render={out.width}x{out.height} "
         f"regions={len(painted)} tones={tones} "
-        f"strokes={stats['silhouette']}+{stats['internal']} "
+        f"strokes={stats['silhouette']}+{stats['internal']}+{stats['shading']}shade "
         f"features=eyes:{feats['eyes']},brows:{feats['brows']},lips:{feats['lips']},"
         f"teeth:{feats['teeth']},nose:{feats['nose']} "
         f"tonal_spread={spread:.1f} "

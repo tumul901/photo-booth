@@ -193,7 +193,7 @@ else:
     check("features verifiable", False, "no landmarks on the rendered art")
 
 print("\n4. Outlines are actually inked")
-flat, painted = flatten_regions(np.array(cut.convert("RGB")), parse,
+flat, painted, _bands = flatten_regions(np.array(cut.convert("RGB")), parse,
                                 np.array(cut.getchannel("A")))
 before = flat.copy()
 stats = draw_outlines(flat, painted, np.array(cut.getchannel("A")), _line_color("orange"))
@@ -229,7 +229,15 @@ except Exception as e:
 print("\n7. Degraded inputs still produce something printable")
 small = cut.resize((480, 600), Image.LANCZOS)
 tiny_art = watercolor_preset(small, landmarks=None, auto_crop=False, render_height=RENDER_HEIGHT)
-check("never upscales a small capture", tiny_art.height <= 600,
+# Renders AT the canvas size even from a small capture. This inverts the rule the
+# cartoon renderer follows, deliberately. That one refuses to upscale because it
+# finds edges with a gradient operator, and enlarging first interpolates away the
+# detail those edges come from. This renderer takes edges from the semantic parse
+# and draws outlines and features as vector strokes, so the failure runs the other
+# way: rendering a 576x720 booth capture at capture size and letting the
+# compositor enlarge it to 1080x1350 draws every line and every eye at 576 and
+# then blows them up 1.9x into mush.
+check("renders at canvas size, not capture size", tiny_art.height == RENDER_HEIGHT,
       f"asked for {RENDER_HEIGHT}, rendered {tiny_art.width}x{tiny_art.height}")
 
 dim = np.array(cut).astype(np.float32)
@@ -243,7 +251,7 @@ check("dim capture keeps modelling", tonal_spread(dim_art) >= MIN_TONAL_SPREAD,
 # face is not found. Must still render, just without features.
 raw = np.array(cut.convert("RGB"))
 alpha = np.array(cut.getchannel("A"))
-noparse, painted_np = flatten_regions(raw, None, alpha)
+noparse, painted_np, _b2 = flatten_regions(raw, None, alpha)
 check("renders with no parse at all", noparse.shape == raw.shape and len(painted_np) >= 1,
       f"{len(painted_np)} region(s)")
 d = draw_features(noparse, raw, None, (0, 0, 0))
