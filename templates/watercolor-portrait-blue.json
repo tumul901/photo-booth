@@ -1,0 +1,28 @@
+{
+  "templateId": "watercolor-portrait-blue",
+  "name": "Watercolor Triangle \u2014 Portrait 4:5 (Blue)",
+  "pngUrl": "cartoon-frame-portrait-blue.png",
+  "templateType": "watercolor",
+  "anchorMode": "full_frame",
+  "showVisualGuide": true,
+  "frameOverlay": true,
+  "allowManualPositioning": false,
+  "dimensions": {
+    "width": 1080,
+    "height": 1350
+  },
+  "captureAspect": "4:5",
+  "theme": "blue",
+  "plexusBackground": true,
+  "slots": [
+    {
+      "id": "main",
+      "x": 0,
+      "y": 0,
+      "width": 1080,
+      "height": 1350,
+      "zIndex": 0
+    }
+  ],
+  "description": "Illustrated flat-shaded portrait. Portrait print format. Triangle spans 81% of width, 56% of height. Shares the cartoon mode's keyed triangle matte, so the capture guide is identical."
+}

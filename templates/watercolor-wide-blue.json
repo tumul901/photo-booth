@@ -1,0 +1,28 @@
+{
+  "templateId": "watercolor-wide-blue",
+  "name": "Watercolor Triangle \u2014 Wide 16:9 (Blue)",
+  "pngUrl": "cartoon-frame-wide-blue.png",
+  "templateType": "watercolor",
+  "anchorMode": "full_frame",
+  "showVisualGuide": true,
+  "frameOverlay": true,
+  "allowManualPositioning": false,
+  "dimensions": {
+    "width": 1920,
+    "height": 1072
+  },
+  "captureAspect": "16:9",
+  "theme": "blue",
+  "plexusBackground": true,
+  "slots": [
+    {
+      "id": "main",
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 1072,
+      "zIndex": 0
+    }
+  ],
+  "description": "Illustrated flat-shaded portrait. Wide canvas \u2014 the frame art's native aspect, so the glow is uncropped. Shares the cartoon mode's keyed triangle matte, so the capture guide is identical."
+}

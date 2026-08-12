@@ -1,0 +1,28 @@
+{
+  "templateId": "watercolor-square-blue",
+  "name": "Watercolor Triangle \u2014 Square 1:1 (Blue)",
+  "pngUrl": "cartoon-frame-square-blue.png",
+  "templateType": "watercolor",
+  "anchorMode": "full_frame",
+  "showVisualGuide": true,
+  "frameOverlay": true,
+  "allowManualPositioning": false,
+  "dimensions": {
+    "width": 1080,
+    "height": 1080
+  },
+  "captureAspect": "1:1",
+  "theme": "blue",
+  "plexusBackground": true,
+  "slots": [
+    {
+      "id": "main",
+      "x": 0,
+      "y": 0,
+      "width": 1080,
+      "height": 1080,
+      "zIndex": 0
+    }
+  ],
+  "description": "Illustrated flat-shaded portrait. Square canvas. Triangle fills 81% of width, 70% of height. Shares the cartoon mode's keyed triangle matte, so the capture guide is identical."
+}
