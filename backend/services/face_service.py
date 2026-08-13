@@ -59,12 +59,12 @@ class FaceService:
         
         # Log status
         if self.mp_detector:
-            print("✅ Primary detector: MediaPipe BlazeFace", flush=True)
+            print("INFO: Primary detector: MediaPipe BlazeFace", flush=True)
         if self.cv_net is not None:
-            print("✅ Fallback detector: OpenCV DNN (Caffe)", flush=True)
+            print("INFO: Fallback detector: OpenCV DNN (Caffe)", flush=True)
         
         if not self.mp_detector and self.cv_net is None:
-            print("⚠️ WARNING: No face detectors available!", flush=True)
+            print("WARNING: No face detectors available!", flush=True)
     
     def warm_up(self):
         """Pre-warm detectors with a dummy image to avoid cold-start lag."""
@@ -74,7 +74,7 @@ class FaceService:
             self.detect_landmarks(dummy)
         except:
             pass
-        print("INFO: Face detector warm-up complete ✅", flush=True)
+        print("INFO: Face detector warm-up complete", flush=True)
     
     def _init_mediapipe(self):
         """Initialize MediaPipe face detector."""
@@ -129,7 +129,7 @@ class FaceService:
         try:
             print("Downloading MediaPipe face model...", flush=True)
             urllib.request.urlretrieve(model_url, self._get_mp_model_path())
-            print("✅ MediaPipe model downloaded", flush=True)
+            print("INFO: MediaPipe model downloaded", flush=True)
         except Exception as e:
             print(f"Download failed: {e}", flush=True)
     
@@ -146,7 +146,7 @@ class FaceService:
             print("Downloading OpenCV face model...", flush=True)
             urllib.request.urlretrieve(prototxt_url, os.path.join(models_dir, "deploy.prototxt"))
             urllib.request.urlretrieve(caffemodel_url, os.path.join(models_dir, "res10_300x300_ssd_iter_140000.caffemodel"))
-            print("✅ OpenCV model downloaded", flush=True)
+            print("INFO: OpenCV model downloaded", flush=True)
         except Exception as e:
             print(f"Download failed: {e}", flush=True)
 

@@ -46,6 +46,12 @@ from services.face_parse_service import (
 
 RENDER_HEIGHT = 1350
 
+# Most distinct colour masses one semantic region may be split into. Exported
+# because it is a term in the render's flatness bound: a region contributes at
+# most `levels` colours per part, so the tone ceiling any test can honestly
+# assert is levels x this. See _colour_split.
+MAX_COLOUR_PARTS = 3
+
 
 # ── Per-region shading behaviour ─────────────────────────────────────────────
 # `levels` is how many flat tones that region is reduced to. Skin carries the
@@ -111,15 +117,40 @@ PAINT_ORDER = (CLOTHES, OTHERS, BODY_SKIN, FACE_SKIN, HAIR)
 #   band_sigma        how wide a shading band is. LOW keeps small real structure
 #                     (nose, cheekbone, lip line); high sweeps it into big
 #                     abstract patches.
+#   levels_scale      multiplier on every region's step count. FEW big steps is
+#                     what "blobby" actually is — the patches get large enough to
+#                     stop tracking anything anatomical.
 #   feature_strength  how opaquely drawn eyes/brows/lips replace the real ones.
+#                     0 leaves them completely alone.
 #   line_scale        outline weight — heavy ink reads as a cartoon of a person
-#                     rather than a portrait of one.
+#                     rather than a portrait of one. 0 removes ink entirely.
+#   contrast          spreads each ramp away from its own median. This is the
+#                     cure for "washed out": quantising a region into steps
+#                     clustered near its median is what greys a picture down.
+#   vividness         saturation multiplier on the sampled colour.
 #   grade / rim       theme colour pushed into the skin, which tints a guest away
 #                     from their own complexion faster than anything else here.
 
 PRESETS: dict[str, dict] = {
-    # Default. Tuned for likeness: the guest should be recognisable first and
-    # stylised second.
+    # Default. A photograph that has been graded and simplified, not a drawing.
+    #
+    # Every knob here points away from the drawn look on purpose: no ink at all,
+    # roughly double the tonal steps, narrow bands so real structure survives,
+    # and much less pre-smoothing. What remains of the stylisation is flat
+    # shading with punchy, saturated colour — the guest's own face, cleaned up
+    # and pushed, rather than an illustration derived from it.
+    "wc_vivid": {
+        "presmooth": 1, "bilateral_sigma": 18.0, "clahe_clip": 0.6,
+        "band_sigma": 0.018, "band_smooth": 0.80, "line_scale": 0.0,
+        # level_bias lifts the whole tonal mapping slightly. Contrast alone
+        # pushes the dark end down as hard as it pushes the light end up, which
+        # on a face already lit from one side crushes the shadow half into a
+        # single black mass; the small lift buys the punch back without it.
+        "grade": 0.02, "level_bias": 0.05, "rim": 0.22,
+        "feature_strength": 0.30,
+        "levels_scale": 1.9, "contrast": 1.22, "vividness": 1.26,
+    },
+    # The previous default. Inked, flatter, more obviously illustrated.
     "wc_natural": {
         "presmooth": 1, "bilateral_sigma": 32.0, "clahe_clip": 0.6,
         "band_sigma": 0.028, "band_smooth": 0.7, "line_scale": 1.15,
@@ -146,7 +177,7 @@ PRESETS: dict[str, dict] = {
     },
 }
 
-DEFAULT_PRESET = "wc_natural"
+DEFAULT_PRESET = "wc_vivid"
 
 
 # ── Colour helpers ───────────────────────────────────────────────────────────
@@ -155,7 +186,17 @@ def _clamp_rgb(rgb) -> tuple[int, int, int]:
     return tuple(int(np.clip(round(c), 0, 255)) for c in rgb)
 
 
-def _build_region_ramp(base_rgb, spec: dict, theme: str, grade: float) -> np.ndarray:
+def _build_region_ramp(
+    base_rgb,
+    spec: dict,
+    theme: str,
+    grade: float,
+    *,
+    levels: Optional[int] = None,
+    contrast: float = 1.0,
+    vividness: float = 1.0,
+    monochrome: bool = False,
+) -> np.ndarray:
     """
     Flat tones for one region, derived from its own median colour.
 
@@ -168,18 +209,62 @@ def _build_region_ramp(base_rgb, spec: dict, theme: str, grade: float) -> np.nda
     re-introduces a continuous gradient and silently undoes the quantisation,
     turning a 15-colour cel render back into a smudged photograph. Grading the
     ramp keeps the output at exactly `levels` colours per region.
+
+    `contrast` and `vividness` are baked in here for exactly the same reason.
+    Punching contrast or saturation with a curve over the finished pixels is the
+    obvious implementation and it silently converts a flat render back into a
+    continuous one, because the curve maps neighbouring band colours to
+    neighbouring — but no longer identical — outputs along every anti-aliased
+    edge. Applied to the ramp, the image still contains exactly `levels` colours
+    per region; they are simply spread further apart and further from grey.
     """
+    val = np.asarray(spec["val"], np.float32)
+    sat = np.asarray(spec["sat"], np.float32)
+
+    n = int(levels) if levels else len(val)
+    if n != len(val):
+        # Resample the hand-tuned curves to n steps. They encode a RELATIONSHIP
+        # — value rises through the ramp, saturation falls as it does, because
+        # that is how a shadow behaves — not a fixed list of colours. Sampling
+        # that relationship at a different rate keeps it intact, so the level
+        # count becomes a free parameter instead of a rewrite of the table.
+        src = np.linspace(0.0, 1.0, len(val), dtype=np.float32)
+        dst = np.linspace(0.0, 1.0, n, dtype=np.float32)
+        val = np.interp(dst, src, val).astype(np.float32)
+        sat = np.interp(dst, src, sat).astype(np.float32)
+
+    # Contrast pushes the value multipliers away from 1.0 — darks darker, lights
+    # lighter — around the region's own median rather than around mid-grey, so a
+    # dark-haired guest and a blond one both gain the same amount of separation.
+    if contrast != 1.0:
+        val = 1.0 + (val - 1.0) * contrast
+
     r, g, b = [c / 255.0 for c in base_rgb]
     h, s, v = colorsys.rgb_to_hsv(r, g, b)
     v = float(np.clip(v, *spec["v_range"]))
-    s = float(np.clip(s, *spec["s_range"]))
+    if monochrome:
+        # A black-and-white photograph must render black and white. The skin
+        # saturation FLOOR exists because booth white-balance often samples a
+        # real complexion as near-grey, and a grey face reads as a corpse — but
+        # applied to a genuinely greyscale source it invents a complexion that
+        # was never photographed, and the vividness multiplier then pushes that
+        # invention to a strong pink. The floor is a correction for a measurement
+        # error, so it has no business firing when the grey is the subject.
+        s = min(s, spec["s_range"][1])
+    else:
+        s = float(np.clip(s, *spec["s_range"]))
+        # Vividness applies AFTER the s_range clamp. The clamp exists to rescue
+        # a near-grey sample from a badly white-balanced booth; it is a floor and
+        # a ceiling on what was measured, not a verdict on how saturated the
+        # finished artwork should be.
+        s = min(s * vividness, 1.0)
 
     palette = get_theme(theme)
     accent = np.array(palette["accent"], np.float32)
     shade = np.array(palette["backdrop"], np.float32)
 
     out = []
-    for vf, sf in zip(spec["val"], spec["sat"]):
+    for vf, sf in zip(val, sat):
         rr, gg, bb = colorsys.hsv_to_rgb(h, min(s * sf, 1.0), min(v * vf, 1.0))
         col = np.array([rr * 255, gg * 255, bb * 255], np.float32)
         if grade > 0:
@@ -240,6 +325,108 @@ def _clean_bands(idx: np.ndarray, levels: int, mask: np.ndarray, min_area: int) 
         med = cv2.medianBlur(donor, k)
         out[holes] = med[holes]
     return out
+
+
+def _colour_split(
+    mask: np.ndarray,
+    lab_all: np.ndarray,
+    *,
+    max_k: int = MAX_COLOUR_PARTS,
+    min_sep: float = 26.0,
+    min_frac: float = 0.12,
+) -> list[np.ndarray]:
+    """
+    Split one semantic region into its distinct colour masses.
+
+    A region gets ONE ramp built from ONE median colour, which is correct for a
+    single garment and badly wrong the moment the region holds two. Two guests
+    side by side land in a single CLOTHES region, so a cream shirt and a blue
+    jersey are averaged to their midpoint — measured on a real pair, that
+    midpoint is (195,152,172), a pink that neither of them is wearing. The hue
+    is then carried faithfully through the whole ramp, so the error is invisible
+    in every downstream check: the renderer is accurately painting the wrong
+    colour.
+
+    Splitting on colour rather than on connected components is deliberate. Two
+    people standing shoulder to shoulder touch, so their clothing is usually one
+    component; what actually distinguishes them is that the colours are far
+    apart. The same test also catches a genuinely two-tone garment, which a
+    component split would miss for the same reason.
+
+    A split is only accepted when the clusters are far apart in Lab AND each
+    holds a real share of the region, so a uniform shirt with a shadow on it
+    stays a single mass. Returns [mask] unchanged when no split is warranted.
+    """
+    if int(mask.sum()) < 512 or max_k < 2:
+        return [mask]
+
+    # Lightness is weighted DOWN, hard, before any clustering happens.
+    #
+    # Straight Lab distance splits a single face into lit and shadowed halves,
+    # because on one cheek dL easily exceeds the separation threshold while da
+    # and db barely move. Each half then gets its own ramp and its own
+    # percentile normalisation, so the shadow is stretched back across the full
+    # tonal range and the face renders in blotches. That variation is SHADING,
+    # which the ramp already exists to handle.
+    #
+    # What actually distinguishes two garments, or two people's clothing, is
+    # chroma. Weighting L down rather than discarding it keeps the one
+    # achromatic case that matters — a black top next to a white one, where
+    # dL ~90 still clears the threshold — while a face stays a single mass.
+    feat = lab_all[mask].copy()
+    feat[:, 0] *= 0.35
+
+    # Subsample for the fit. Cluster centres are means over thousands of pixels;
+    # a few thousand samples locate them to well under the separation threshold.
+    step = max(1, len(feat) // 4000)
+    sample = np.ascontiguousarray(feat[::step])
+
+    # Seeded: the module contract is that the same guest always produces the
+    # same artwork, and k-means++ picks its starting centres at random.
+    cv2.setRNGSeed(12345)
+    crit = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 20, 1.0)
+
+    chosen = None
+    for k in range(2, max_k + 1):
+        if len(sample) < k * 32:
+            break
+        _, labels, centres = cv2.kmeans(sample, k, None, crit, 3, cv2.KMEANS_PP_CENTERS)
+        labels = labels.ravel()
+        shares = np.array([(labels == i).mean() for i in range(k)])
+        if shares.min() < min_frac:
+            continue
+        sep = min(float(np.linalg.norm(centres[i] - centres[j]))
+                  for i in range(k) for j in range(i + 1, k))
+        if sep < min_sep:
+            continue
+        chosen = centres  # keep looking; prefer the largest k that still passes
+
+    if chosen is None:
+        return [mask]
+
+    # Assign every pixel in the region to its nearest accepted centre. Done as k
+    # passes rather than one broadcast: the broadcast form allocates an
+    # (N, k, 3) float array, which on a full-resolution clothing region is
+    # hundreds of megabytes and dominates the whole render.
+    best_d = None
+    nearest = np.zeros(len(feat), np.uint8)
+    for i, c in enumerate(chosen):
+        di = ((feat - c) ** 2).sum(axis=1)
+        if best_d is None:
+            best_d = di
+        else:
+            closer = di < best_d
+            nearest[closer] = i
+            best_d = np.minimum(best_d, di)
+    idx_map = np.full(mask.shape, 255, np.uint8)
+    idx_map[mask] = nearest.astype(np.uint8)
+
+    parts = []
+    for i in range(len(chosen)):
+        part = idx_map == i
+        if part.sum() >= 256:
+            parts.append(part)
+    return parts or [mask]
 
 
 # ── Contour simplification ───────────────────────────────────────────────────
@@ -320,6 +507,9 @@ def flatten_regions(
     band_sigma: float = 0.05,
     band_smooth: float = 1.0,
     level_bias: float = 0.0,
+    levels_scale: float = 1.0,
+    contrast: float = 1.0,
+    vividness: float = 1.0,
     work_max: int = 720,
 ) -> tuple[np.ndarray, dict[int, np.ndarray], dict[int, np.ndarray]]:
     """
@@ -392,6 +582,22 @@ def flatten_regions(
         r = int(max(3, round(min(h, w) * band_sigma * 1.4)) | 1)
         gray = cv2.bilateralFilter(gray, min(r, 15), 90, 90)
 
+    # Converted once, not per region: cvtColor over the working image is the
+    # single most expensive thing _colour_split would otherwise repeat.
+    lab_all = cv2.cvtColor(sm, cv2.COLOR_RGB2LAB).astype(np.float32)
+
+    # Is the SOURCE greyscale? Measured on the subject, not guessed from the
+    # file: a monochrome portrait and a colour one are indistinguishable by
+    # format. Real captures sit far from the threshold — measured across a
+    # sample, true black-and-white scores 0.0 and colour photographs 74-95 —
+    # so this is not a close call in practice.
+    subj_px = sm[subject]
+    monochrome = bool(
+        len(subj_px)
+        and float((subj_px.max(axis=1).astype(np.int16)
+                   - subj_px.min(axis=1).astype(np.int16)).mean()) < 8.0
+    )
+
     out = np.zeros_like(rgb)
     painted: dict[int, np.ndarray] = {}
     bands: dict[int, np.ndarray] = {}
@@ -405,44 +611,86 @@ def flatten_regions(
         if mask.sum() < 64:
             continue
         spec = REGION_SPEC.get(cls, REGION_SPEC[OTHERS])
-        levels = spec["levels"]
+        # Level counts scale together rather than being re-tabled per region, so
+        # the ratio between them survives — skin always carries more steps than
+        # hair, which is what stops the whole picture reading as one uniform
+        # posterise. More steps is what makes the render less blobby: the tonal
+        # patches get smaller and land closer to where the light actually falls.
+        levels = max(2, int(round(spec["levels"] * levels_scale)))
 
-        base = np.median(sm[mask].reshape(-1, 3), axis=0)
-        ramp = _build_region_ramp(base, spec, theme, grade)
+        # Each distinct colour mass in the region is shaded on its own ramp,
+        # sampled from its own pixels. See _colour_split: one ramp per region
+        # averages two guests' clothing into a colour neither is wearing.
+        region_painted = np.zeros((full_h, full_w), bool)
+        region_bands = np.full((full_h, full_w), 255, np.uint8)
 
-        # Robust normalisation inside the region. Percentiles rather than
-        # min/max: one specular highlight on a forehead would otherwise
-        # compress every real tone into the bottom band.
-        vals = gray[mask].astype(np.float32)
-        lo, hi = np.percentile(vals, (4, 96))
-        if hi - lo < 1e-3:
-            hi = lo + 1.0
-        t = np.clip((gray.astype(np.float32) - lo) / (hi - lo) + level_bias, 0.0, 1.0)
+        for part in _colour_split(mask, lab_all):
+            base = np.median(sm[part].reshape(-1, 3), axis=0)
+            ramp = _build_region_ramp(base, spec, theme, grade, levels=levels,
+                                      contrast=contrast, vividness=vividness,
+                                      monochrome=monochrome)
 
-        idx = np.clip((t * levels).astype(np.int32), 0, levels - 1).astype(np.uint8)
+            # Robust normalisation inside the part. Percentiles rather than
+            # min/max: one specular highlight on a forehead would otherwise
+            # compress every real tone into the bottom band. Per part rather
+            # than per region for the same reason the ramp is: a dark jersey and
+            # a pale shirt have different tonal ranges, and normalising them
+            # together spends most of one garment's steps on the other's.
+            vals = gray[part].astype(np.float32)
+            lo, hi = np.percentile(vals, (4, 96))
+            if hi - lo < 1e-3:
+                hi = lo + 1.0
+            t = np.clip((gray.astype(np.float32) - lo) / (hi - lo) + level_bias, 0.0, 1.0)
 
-        # Clean the band map, not the image: a median pass on the level indices
-        # removes the speckle that quantisation always produces along a soft
-        # gradient, and leaves the band boundaries as clean shapes.
-        k = int(max(3, round(min(h, w) * 0.006 * band_smooth)) | 1)
-        idx = cv2.medianBlur(idx, min(k, 31))
-        idx = _clean_bands(idx, levels, mask,
-                           min_area=int(max(24, mask.size * 0.00025 * band_smooth)))
+            # Band-cleaning is done inside the part's bounding box, not over the
+            # whole canvas. _clean_bands runs a connected-component sweep per
+            # level, so once regions split into parts it repeats that sweep on
+            # mostly-empty full-size arrays — measured at roughly 4x the cost of
+            # the entire rest of the flatten.
+            ys, xs = np.nonzero(part)
+            y0, y1 = int(ys.min()), int(ys.max()) + 1
+            x0, x1 = int(xs.min()), int(xs.max()) + 1
+            sub_part = part[y0:y1, x0:x1]
+            sub_idx = np.clip((t[y0:y1, x0:x1] * levels).astype(np.int32),
+                              0, levels - 1).astype(np.uint8)
 
-        # Back to output resolution for the colour lookup. NEAREST on the band
-        # indices, never on the colours: interpolating between two ramp steps
-        # would manufacture in-between tones and undo the quantisation at every
-        # band edge — the same trap as grading pixels instead of the ramp.
-        if scale < 1.0:
-            idx_full = cv2.resize(idx, (full_w, full_h), interpolation=cv2.INTER_NEAREST)
-            mask_full = cv2.resize(mask.astype(np.uint8), (full_w, full_h),
-                                   interpolation=cv2.INTER_NEAREST).astype(bool) & subject_full
-        else:
-            idx_full, mask_full = idx, mask
+            # Clean the band map, not the image: a median pass on the level
+            # indices removes the speckle that quantisation always produces
+            # along a soft gradient, and leaves the band boundaries as clean
+            # shapes.
+            k = int(max(3, round(min(h, w) * 0.006 * band_smooth)) | 1)
+            sub_idx = cv2.medianBlur(sub_idx, min(k, 31))
+            # Area floor stays canvas-relative, not crop-relative: a speckle is
+            # too small to keep because of how it prints, which has nothing to
+            # do with how large the part containing it happens to be.
+            sub_idx = _clean_bands(sub_idx, levels, sub_part,
+                                   min_area=int(max(24, mask.size * 0.00025 * band_smooth)))
 
-        out[mask_full] = ramp[np.clip(idx_full[mask_full], 0, levels - 1)]
-        painted[cls] = mask_full
-        bands[cls] = np.where(mask_full, idx_full, 255).astype(np.uint8)
+            idx = np.zeros((h, w), np.uint8)
+            idx[y0:y1, x0:x1] = sub_idx
+
+            # Back to output resolution for the colour lookup. NEAREST on the
+            # band indices, never on the colours: interpolating between two ramp
+            # steps would manufacture in-between tones and undo the quantisation
+            # at every band edge — the same trap as grading pixels instead of
+            # the ramp.
+            if scale < 1.0:
+                idx_full = cv2.resize(idx, (full_w, full_h), interpolation=cv2.INTER_NEAREST)
+                part_full = cv2.resize(part.astype(np.uint8), (full_w, full_h),
+                                       interpolation=cv2.INTER_NEAREST).astype(bool) & subject_full
+            else:
+                idx_full, part_full = idx, part
+
+            if not part_full.any():
+                continue
+            out[part_full] = ramp[np.clip(idx_full[part_full], 0, levels - 1)]
+            region_painted |= part_full
+            region_bands[part_full] = idx_full[part_full]
+
+        if not region_painted.any():
+            continue
+        painted[cls] = region_painted
+        bands[cls] = region_bands
 
     return out, painted, bands
 
@@ -463,12 +711,19 @@ def draw_outlines(
     BiRefNet resolves hair wisps and finger gaps that a 256px segmenter cannot,
     and the silhouette is the one line a viewer reads first.
     """
+    stats = {"silhouette": 0, "internal": 0, "shading": 0}
+    # line_scale 0 means "no ink at all", not "hairline ink". The weights below
+    # all floor at 1px, so without this the un-inked look is unreachable by
+    # turning the dial down — it bottoms out at a thin drawing rather than at a
+    # painted one.
+    if line_scale <= 0:
+        return stats
+
     h, w = canvas.shape[:2]
     unit = max(h, w) / 1000.0
     outer_t = max(2, int(round(4.2 * unit * line_scale)))
     inner_t = max(1, int(round(2.6 * unit * line_scale)))
 
-    stats = {"silhouette": 0, "internal": 0, "shading": 0}
     stats["silhouette"] = _trace(canvas, alpha > 128, color, outer_t,
                                  simplify=0.0016, smooth=3, min_area_frac=0.002)
 
@@ -596,9 +851,18 @@ def draw_features(
     *,
     line_scale: float = 1.0,
     feature_strength: float = 1.0,
+    strokes: bool = True,
 ) -> dict[str, int]:
     """
     Draw eyes, brows, lips and nose as vector shapes at measured positions.
+
+    `strokes=False` keeps the sampled COLOUR work — sclera, iris, lip and brow
+    tone — and drops every drawn line: lid, lip outline, jaw, nose base. That
+    split is the useful one, because the two halves fail differently. The colour
+    work is reconstruction from the guest's own pixels and survives at any
+    stylisation level; the lines are the part that reads as "drawn", and a jaw
+    stroke across an otherwise photographic face is the single most cartoonish
+    mark in the render.
 
     This is what separates an illustration from a photo filter. No amount of
     quantising and edge-finding recovers an eye from a booth capture: at typical
@@ -622,6 +886,12 @@ def draw_features(
 
     drawn = {"eyes": 0, "brows": 0, "lips": 0, "nose": 0, "teeth": 0, "jaw": 0}
     if parse is None or parse.landmarks is None:
+        return drawn
+    # Eyes and lips carry opacity FLOORS below, so that turning the dial down
+    # never leaves a half-painted eye — the worst of both looks. That makes zero
+    # unreachable by the dial alone, so it is handled as its own case: leave the
+    # guest's own features entirely untouched.
+    if feature_strength <= 0:
         return drawn
 
     def paint(poly: np.ndarray, colour, strength: float) -> None:
@@ -732,11 +1002,12 @@ def draw_features(
             + layer[sel].astype(np.float32) * a_iris, 0, 255).astype(np.uint8)
 
         # Lid: heavier along the top, as a drawn eye always is.
-        cv2.polylines(canvas, [eye], True, line_color, thin, cv2.LINE_AA)
-        top = eye[eye[:, 1] <= np.median(eye[:, 1])]
-        if len(top) >= 2:
-            order = top[np.argsort(top[:, 0])]
-            cv2.polylines(canvas, [order], False, line_color, lw, cv2.LINE_AA)
+        if strokes:
+            cv2.polylines(canvas, [eye], True, line_color, thin, cv2.LINE_AA)
+            top = eye[eye[:, 1] <= np.median(eye[:, 1])]
+            if len(top) >= 2:
+                order = top[np.argsort(top[:, 0])]
+                cv2.polylines(canvas, [order], False, line_color, lw, cv2.LINE_AA)
         drawn["eyes"] += 1
 
     # ── Brows ──
@@ -757,7 +1028,8 @@ def draw_features(
         # on a lot of faces, so an aggressive tint stains facial hair pink.
         lip_col = _shift(_sample(source_rgb, outer, (150, 90, 85)), v=0.97, s=1.10)
         paint(outer, lip_col, 0.68 * feature_strength)
-        cv2.polylines(canvas, [outer], True, line_color, thin, cv2.LINE_AA)
+        if strokes:
+            cv2.polylines(canvas, [outer], True, line_color, thin, cv2.LINE_AA)
         drawn["lips"] += 1
 
         if inner is not None and len(inner) >= 6:
@@ -777,14 +1049,15 @@ def draw_features(
                     teeth[int(cut):, :] = 0
                     canvas[teeth > 0] = _shift(lip_col, v=2.4, s=0.10)
                     drawn["teeth"] = 1
-                cv2.polylines(canvas, [inner], True, line_color, thin, cv2.LINE_AA)
+                if strokes:
+                    cv2.polylines(canvas, [inner], True, line_color, thin, cv2.LINE_AA)
 
     # ── Jaw ──
     # Only the lower arc of the face oval. The upper arc runs under the hairline
     # where an illustrator draws nothing — inking the full oval puts a headband
     # across the forehead. Sorting by x is safe here because a jaw runs
     # monotonically ear -> chin -> ear on any roughly frontal face.
-    if oval is not None and len(oval) >= 8:
+    if strokes and oval is not None and len(oval) >= 8:
         cy = float(oval[:, 1].mean())
         lower = oval[oval[:, 1] > cy]
         if len(lower) >= 4:
@@ -794,7 +1067,7 @@ def draw_features(
 
     # ── Nose base ──
     nose = parse.points(NOSE_BASE)
-    if nose is not None and len(nose) >= 3:
+    if strokes and nose is not None and len(nose) >= 3:
         order = nose[np.argsort(nose[:, 0])]
         cv2.polylines(canvas, [order], False, line_color, thin, cv2.LINE_AA)
         drawn["nose"] = 1
@@ -884,8 +1157,14 @@ def watercolor_preset(
     stats = draw_outlines(flat, painted, alpha, ink, line_scale=line_scale, bands=bands)
     # Features last so lids and lips sit on top of the region outlines rather
     # than being crossed by them.
-    feats = draw_features(flat, rgb, parse, ink, line_scale=line_scale,
-                          feature_strength=feature_strength)
+    #
+    # One dial controls both: if the render carries no outlines, drawn lid, jaw
+    # and nose strokes would be the only linework in the picture, which looks
+    # less like a stylistic choice than like an unfinished one. The sampled
+    # colour work still runs — that is reconstruction, not ink.
+    feats = draw_features(flat, rgb, parse, ink, line_scale=max(line_scale, 1.0),
+                          feature_strength=feature_strength,
+                          strokes=line_scale > 0)
     add_rim_light(flat, alpha, theme, strength=rim)
     ink_ms = (time.perf_counter() - t_ink) * 1000
 
@@ -901,6 +1180,9 @@ def watercolor_preset(
         f"total={(time.perf_counter() - t0) * 1000:.0f}ms "
         f"in={img.width}x{img.height} render={out.width}x{out.height} "
         f"regions={len(painted)} tones={tones} "
+        f"levels_x{params.get('levels_scale', 1.0):.2f} "
+        f"contrast={params.get('contrast', 1.0):.2f} "
+        f"vivid={params.get('vividness', 1.0):.2f} "
         f"strokes={stats['silhouette']}+{stats['internal']}+{stats['shading']}shade "
         f"features=eyes:{feats['eyes']},brows:{feats['brows']},lips:{feats['lips']},"
         f"teeth:{feats['teeth']},nose:{feats['nose']} "

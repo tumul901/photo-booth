@@ -34,7 +34,8 @@ from services.face_parse_service import (
 )
 from services.watercolor_service import (
     watercolor_preset, flatten_regions, draw_features, draw_outlines,
-    _line_color, PRESETS, RENDER_HEIGHT,
+    _line_color, PRESETS, RENDER_HEIGHT, REGION_SPEC, MAX_COLOUR_PARTS,
+    DEFAULT_PRESET,
 )
 from services.plexus_background import generate_plexus
 from services.geometric_overlays import compose_duotone_artwork
@@ -44,9 +45,22 @@ _sess = None
 TEST_IMAGE = "../templates/photobooth (1).jpg.jpeg"
 OUT_DIR = "../outputs"
 
-# A flat-shaded region has at most `levels` colours. Allowing generous headroom
-# for several regions, anything past this means a gradient survived quantisation.
-MAX_TONES = 40
+# A flat-shaded region contributes at most `levels` colours PER COLOUR MASS, so
+# the ceiling is derived from the renderer's own tables rather than pinned to a
+# number. A hardcoded ceiling has to be re-guessed every time a preset changes
+# its level count, and the tempting fix at that point is to raise it until the
+# suite goes green — which quietly turns the one check that proves the output is
+# quantised at all into a check that proves nothing.
+def max_tones(preset: str) -> int:
+    ls = PRESETS[preset].get("levels_scale", 1.0)
+    per_region = sum(max(2, round(spec["levels"] * ls)) for spec in REGION_SPEC.values())
+    return per_region * MAX_COLOUR_PARTS
+
+
+# A continuous-tone photograph of a face runs to five figures of distinct
+# colours, so even the loosest derived ceiling is three orders of magnitude
+# below "the quantiser stopped working".
+MAX_TONES = max_tones(DEFAULT_PRESET)
 # A portrait with real modelling varies across the subject; a flat blob is ~0.
 MIN_TONAL_SPREAD = 15.0
 
@@ -138,8 +152,9 @@ for name in PRESETS:
     art = watercolor_preset(cut, preset=name, landmarks=None, auto_crop=False)
     ms = (time.perf_counter() - t0) * 1000
     tones, spread = tone_count(art), tonal_spread(art)
-    check(f"preset '{name}' is flat", 2 <= tones <= MAX_TONES,
-          f"{tones} tones (2..{MAX_TONES} expected)")
+    ceiling = max_tones(name)
+    check(f"preset '{name}' is flat", 2 <= tones <= ceiling,
+          f"{tones} tones (2..{ceiling} expected)")
     check(f"preset '{name}' keeps modelling", spread >= MIN_TONAL_SPREAD,
           f"spread={spread:.1f} (>= {MIN_TONAL_SPREAD}), {ms:.0f}ms")
 
@@ -375,6 +390,148 @@ if tested == 0:
 else:
     check(f"all {tested} varied faces render flat with modelling", not bad,
           "; ".join(bad) if bad else f"{tested} faces, every one within bounds")
+
+print("\n12. Un-inked default: no line art, punchier colour")
+# The default preset renders as a graded photograph rather than a drawing, so
+# the properties that matter are the absence of ink and the presence of colour
+# separation — neither of which the flatness checks above can see.
+from services.watercolor_service import _colour_split, _build_region_ramp
+from services.face_parse_service import FACE_SKIN
+
+no_ink = draw_outlines(np.zeros((600, 600, 3), np.uint8), {}, np.full((600, 600), 255, np.uint8),
+                       (20, 20, 20), line_scale=0.0)
+check("line_scale 0 draws nothing", sum(no_ink.values()) == 0, f"{no_ink}")
+
+# A stroke is a THIN dark structure laid over shading, so it is detected by
+# thinness, not by darkness. Counting near-black pixels instead reports ~45% on
+# both presets, because it is measuring the guest's dark hair and clothing —
+# which is a property of the photograph, not of the renderer. Black-hat responds
+# only to dark detail narrower than its kernel, which is exactly what a drawn
+# line is and exactly what a shaded mass is not.
+# "No line art" is asserted on the MECHANISM, not on a pixel statistic.
+#
+# The obvious pixel test — count thin dark strokes in the finished render — was
+# tried and does not work here, in a way worth recording so it is not retried.
+# At this level count a shading band can itself be two pixels wide, so black-hat
+# thinness fires on ordinary flat shading; and on a dark-haired guest those
+# bands also land within tolerance of the ink colour, so requiring both
+# properties does not separate them either. The two presets come out 0.34% vs
+# 0.64% — a gap far too narrow to distinguish "no ink" from "dark hair".
+#
+# The three checks below prove the same property structurally and exactly.
+check(f"default '{DEFAULT_PRESET}' is configured with no ink",
+      PRESETS[DEFAULT_PRESET]["line_scale"] == 0, f"line_scale={PRESETS[DEFAULT_PRESET]['line_scale']}")
+
+# Re-parsed at the cutout's own size. The parse from section 1 cannot be reused:
+# section 3 rescales its landmarks IN PLACE into artwork coordinates, so by this
+# point that object no longer describes `cut`.
+p_feat = face_parse_service.parse(cut)
+if p_feat is None or p_feat.landmarks is None:
+    # Reported, not skipped silently — a check that quietly vanishes reads as a
+    # pass in the summary line, which is the failure mode this suite exists to
+    # avoid.
+    check("stroke switch is exercised", False, "re-parse found no landmarks")
+else:
+    src_px = np.array(cut.convert("RGB"))
+    canvas_a = np.zeros_like(src_px)
+    canvas_b = np.zeros_like(src_px)
+    with_ink = draw_features(canvas_a, src_px, p_feat, (20, 18, 16), strokes=True)
+    no_ink_f = draw_features(canvas_b, src_px, p_feat, (20, 18, 16), strokes=False)
+    # Jaw and nose are stroke-ONLY features: they have no fill, so they are the
+    # cleanest evidence that the stroke switch is honoured.
+    check("strokes=False drops the jaw and nose lines",
+          with_ink["jaw"] + with_ink["nose"] > 0
+          and no_ink_f["jaw"] + no_ink_f["nose"] == 0,
+          f"inked jaw/nose={with_ink['jaw']}/{with_ink['nose']}, "
+          f"plain={no_ink_f['jaw']}/{no_ink_f['nose']}")
+    # ...while the sampled colour work still runs, which is the whole point of
+    # splitting the two: an un-inked face still gets its own eyes.
+    check("strokes=False keeps the sampled eye and lip colour",
+          no_ink_f["eyes"] == with_ink["eyes"] and no_ink_f["lips"] == with_ink["lips"],
+          f"eyes={no_ink_f['eyes']} lips={no_ink_f['lips']}")
+
+plain = watercolor_preset(cut, preset=DEFAULT_PRESET, landmarks=None, auto_crop=False)
+inked = watercolor_preset(cut, preset="wc_natural", landmarks=None, auto_crop=False)
+
+# Contrast and vividness must move the picture, not just the parameters.
+def spread_and_sat(art: Image.Image) -> tuple[float, float]:
+    a = np.array(art.getchannel("A")) > 200
+    hsv = cv2.cvtColor(np.array(art.convert("RGB")), cv2.COLOR_RGB2HSV)
+    lum = np.array(art.convert("L"))
+    return float(lum[a].std()), float(hsv[..., 1][a].mean())
+
+flat_sp, flat_sat = spread_and_sat(inked)
+viv_sp, viv_sat = spread_and_sat(plain)
+check("default is more saturated than the inked preset", viv_sat > flat_sat * 1.05,
+      f"S {viv_sat:.1f} vs {flat_sat:.1f}")
+check("default keeps tonal range", viv_sp >= MIN_TONAL_SPREAD, f"spread={viv_sp:.1f}")
+
+# The ramp is where contrast and vividness are applied, so assert it there too:
+# a curve over finished pixels would pass a whole-image check while silently
+# undoing the quantisation.
+spec = REGION_SPEC[FACE_SKIN]
+base_ramp = _build_region_ramp((190, 150, 130), spec, "orange", 0.0, levels=8)
+hot_ramp = _build_region_ramp((190, 150, 130), spec, "orange", 0.0, levels=8,
+                              contrast=1.35, vividness=1.28)
+b_rng = int(base_ramp.max(axis=0).mean() - base_ramp.min(axis=0).mean())
+h_rng = int(hot_ramp.max(axis=0).mean() - hot_ramp.min(axis=0).mean())
+check("contrast widens the ramp", h_rng > b_rng, f"range {h_rng} vs {b_rng}")
+check("level count is honoured exactly", len(hot_ramp) == 8, f"{len(hot_ramp)} steps")
+
+# A greyscale photograph must render greyscale. The skin saturation floor exists
+# to rescue a badly white-balanced colour capture; fired on a genuinely
+# monochrome source it invents a complexion, and vividness then pushes that
+# invention to a strong pink.
+grey_ramp = _build_region_ramp((150, 150, 150), spec, "orange", 0.0, levels=8,
+                               contrast=1.22, vividness=1.26, monochrome=True)
+grey_chroma = float((grey_ramp.max(axis=1).astype(int) - grey_ramp.min(axis=1).astype(int)).mean())
+colour_ramp = _build_region_ramp((150, 150, 150), spec, "orange", 0.0, levels=8,
+                                 contrast=1.22, vividness=1.26)
+col_chroma = float((colour_ramp.max(axis=1).astype(int) - colour_ramp.min(axis=1).astype(int)).mean())
+check("grey source stays grey", grey_chroma < 4.0, f"chroma {grey_chroma:.1f}")
+check("colour source still gets the saturation floor", col_chroma > 20.0,
+      f"chroma {col_chroma:.1f} (floor must still rescue washed-out captures)")
+
+# And end to end, because the detection lives in flatten_regions, not the ramp.
+mono_src = Image.open(TEST_IMAGE).convert("L").convert("RGB")
+if max(mono_src.size) > 1000:
+    f = 1000 / max(mono_src.size)
+    mono_src = mono_src.resize((int(mono_src.width * f), int(mono_src.height * f)), Image.LANCZOS)
+mono_art = watercolor_preset(cutout(mono_src), landmarks=None, auto_crop=False)
+ma = np.array(mono_art.convert("RGB")).astype(np.int16)
+msel = np.array(mono_art.getchannel("A")) > 200
+# The rim light is a deliberate neon edge and is genuinely coloured, so measure
+# the interior the same way the tone count does.
+rim_px = max(3, int(round(min(mono_art.size) * 0.030)))
+inner = cv2.erode(msel.astype(np.uint8),
+                  cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (rim_px * 2 + 1,) * 2)) > 0
+if inner.sum() > 500:
+    mono_chroma = float((ma[inner].max(axis=1) - ma[inner].min(axis=1)).mean())
+    check("greyscale photo renders without invented colour", mono_chroma < 12.0,
+          f"mean chroma {mono_chroma:.1f}")
+
+# Colour splitting: two distinct masses must separate, one shaded mass must not.
+lab = cv2.cvtColor(np.zeros((200, 200, 3), np.uint8), cv2.COLOR_RGB2LAB).astype(np.float32)
+two = np.zeros((200, 200, 3), np.uint8)
+two[:, :100] = (230, 220, 200)      # cream shirt
+two[:, 100:] = (30, 70, 200)        # blue jersey
+lab2 = cv2.cvtColor(two, cv2.COLOR_RGB2LAB).astype(np.float32)
+parts2 = _colour_split(np.ones((200, 200), bool), lab2)
+check("two garments split into separate ramps", len(parts2) >= 2, f"{len(parts2)} part(s)")
+
+# One skin tone under a strong lighting gradient — the case that must NOT split,
+# because that variation is shading and the ramp already handles it.
+grad = np.zeros((200, 200, 3), np.uint8)
+ramp_v = np.linspace(0.45, 1.0, 200, dtype=np.float32)[None, :, None]
+grad[:] = (np.array((205, 165, 140), np.float32)[None, None, :] * ramp_v).astype(np.uint8)
+labg = cv2.cvtColor(grad, cv2.COLOR_RGB2LAB).astype(np.float32)
+parts1 = _colour_split(np.ones((200, 200), bool), labg)
+check("shaded single tone stays one mass", len(parts1) == 1,
+      f"{len(parts1)} part(s) — lightness must not drive the split")
+
+# Determinism: the module's contract is that a guest always gets the same art.
+check("colour split is deterministic",
+      len(_colour_split(np.ones((200, 200), bool), lab2)) == len(parts2), "repeat run matches")
 
 print("\n" + "=" * 70)
 if failures:
