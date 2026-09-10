@@ -241,12 +241,16 @@
 
 /* ── Photo slot toolbar ─────────────────────────────────────────── */
 
-.photoToolbar {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 10;
+.canvasColumn {
   display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.photoToolbar {
+  display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 

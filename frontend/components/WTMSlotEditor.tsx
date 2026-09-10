@@ -765,7 +765,7 @@ const WTMSlotEditor: React.FC<WTMSlotEditorProps> = ({ config, apiBaseUrl, onSav
 
       <div className={styles.editorMain}>
         {/* Canvas */}
-        <div className={styles.canvasWrapper}>
+        <div className={styles.canvasColumn}>
           {tab === 'photo' && (
             <div className={styles.photoToolbar}>
               <button className={`${styles.toolBtn} ${photoMode === 'draw' ? styles.toolActive : ''}`} onClick={() => setPhotoMode('draw')}>✏️ Draw Slot</button>
@@ -783,29 +783,31 @@ const WTMSlotEditor: React.FC<WTMSlotEditorProps> = ({ config, apiBaseUrl, onSav
               {photoSlot && <button className={styles.toolBtnDanger} onClick={() => { setPhotoSlot(null); setBaseline(null); setPhotoDirty(true); setPhotoMode('draw'); }}>🗑️ Clear</button>}
             </div>
           )}
-          <img
-            ref={imageRef}
-            className={styles.baseImage}
-            src={`${apiBaseUrl}/api/admin/wtm/templates/${config.template_id}/image`}
-            alt="Base"
-            onLoad={handleImageLoad}
-          />
-          <canvas
-            ref={canvasRef}
-            className={styles.canvas}
-            style={{ cursor: canvasCursor }}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={() => {
-              setIsDrawing(false);
-              if (wordsDragMode !== 'none') { setWordsDragMode('none'); setWordsDragIdx(null); }
-              isDrawingBaseline.current = false;
-              setBaselineDraft(null);
-              setDraggingBaseline(null);
-              baselineDragRef.current = null;
-            }}
-          />
+          <div className={styles.canvasWrapper}>
+            <img
+              ref={imageRef}
+              className={styles.baseImage}
+              src={`${apiBaseUrl}/api/admin/wtm/templates/${config.template_id}/image`}
+              alt="Base"
+              onLoad={handleImageLoad}
+            />
+            <canvas
+              ref={canvasRef}
+              className={styles.canvas}
+              style={{ cursor: canvasCursor }}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={() => {
+                setIsDrawing(false);
+                if (wordsDragMode !== 'none') { setWordsDragMode('none'); setWordsDragIdx(null); }
+                isDrawingBaseline.current = false;
+                setBaselineDraft(null);
+                setDraggingBaseline(null);
+                baselineDragRef.current = null;
+              }}
+            />
+          </div>
         </div>
 
         {/* Sidebar */}
