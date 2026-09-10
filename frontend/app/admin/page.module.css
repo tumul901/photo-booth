@@ -18,6 +18,10 @@
   flex-direction: column;
   background-color: #0f0f1a;
   color: #fff;
+  /* Guest pages switched to a light theme (see app/globals.css); admin stays
+     dark and independent, so it needs its own color-scheme for native chrome
+     (scrollbars, select popups) to still render correctly. */
+  color-scheme: dark;
 }
 
 .header {

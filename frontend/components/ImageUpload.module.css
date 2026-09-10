@@ -24,16 +24,23 @@
 .dropzone:hover,
 .dropzone.dragging {
   border-color: var(--color-accent-primary);
-  background: rgba(20, 20, 35, 0.85);
+  background: rgba(255, 253, 246, 0.9);
   transform: translateY(-2px);
   box-shadow: var(--shadow-lg), 0 0 0 1px var(--color-accent-primary);
 }
 
 .uploadIcon {
-  font-size: 3.5rem;
+  display: flex;
+  justify-content: center;
   margin-bottom: var(--space-sm);
   opacity: 0.8;
+  color: var(--color-text-secondary);
   transition: transform var(--transition-base);
+}
+
+.uploadIcon svg {
+  width: 56px;
+  height: 56px;
 }
 
 .dropzone:hover .uploadIcon {

@@ -1,12 +1,31 @@
 .main {
   min-height: 100vh;
   padding: var(--space-xl) var(--space-md);
-  background: 
-    radial-gradient(circle at 10% 20%, rgba(102, 126, 234, 0.1) 0%, transparent 40%),
-    radial-gradient(circle at 90% 80%, rgba(118, 75, 162, 0.1) 0%, transparent 40%);
+  background:
+    radial-gradient(circle at 10% 20%, rgba(46, 90, 45, 0.1) 0%, transparent 40%),
+    radial-gradient(circle at 90% 80%, rgba(74, 143, 71, 0.1) 0%, transparent 40%);
   display: flex;
   flex-direction: column;
   align-items: center;
+  position: relative;
+}
+
+.brandLogo {
+  position: fixed;
+  top: 12px;
+  left: 16px;
+  z-index: 1000;
+  height: 40px;
+  width: auto;
+  pointer-events: none;
+}
+
+@media (max-width: 600px) {
+  .brandLogo {
+    height: 30px;
+    top: 8px;
+    left: 10px;
+  }
 }
 
 /* Header Section */
@@ -20,9 +39,7 @@
   font-size: 3rem;
   font-weight: 800;
   margin-bottom: var(--space-md);
-  background: linear-gradient(135deg, #fff 0%, #a5b4fc 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  color: #2E5A2D;
   letter-spacing: -0.02em;
 }
 
@@ -55,7 +72,7 @@
 }
 
 .toggleContainer:hover {
-  border-color: rgba(255, 255, 255, 0.3);
+  border-color: rgba(46, 90, 45, 0.35);
 }
 
 .toggleLabel {
@@ -66,7 +83,7 @@
 }
 
 .toggleLabel.active {
-  color: white;
+  color: #2E5A2D;
 }
 
 .toggleSwitch {
@@ -137,20 +154,20 @@
 .card:hover {
   transform: translateY(-5px);
   box-shadow: var(--glass-shadow);
-  border-color: rgba(255, 255, 255, 0.3);
+  border-color: rgba(46, 90, 45, 0.35);
 }
 
 /* Popular Card Styles */
 .cardPopular {
   border-color: var(--color-accent-primary);
-  box-shadow: 0 0 20px rgba(102, 126, 234, 0.2);
+  box-shadow: 0 0 20px rgba(46, 90, 45, 0.2);
   transform: scale(1.05);
   z-index: 2;
 }
 
 .cardPopular:hover {
   transform: scale(1.05) translateY(-5px);
-  box-shadow: 0 0 30px rgba(102, 126, 234, 0.4);
+  box-shadow: 0 0 30px rgba(46, 90, 45, 0.4);
 }
 
 .popularBadge {
@@ -192,7 +209,7 @@
 .price {
   font-size: 3rem;
   font-weight: 700;
-  color: white;
+  color: #2E5A2D;
   line-height: 1;
 }
 
@@ -227,7 +244,7 @@
   border-radius: var(--radius-md);
   border: 1px solid var(--glass-border);
   background: transparent;
-  color: white;
+  color: #2E5A2D;
   font-weight: 600;
   font-size: 1rem;
   cursor: pointer;
@@ -235,12 +252,13 @@
 }
 
 .button:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(46, 90, 45, 0.1);
 }
 
 .buttonPrimary {
   background: linear-gradient(135deg, var(--color-accent-primary), var(--color-accent-secondary));
   border: none;
+  color: #fff;
   box-shadow: var(--shadow-md);
 }
 
@@ -278,7 +296,7 @@
 .faqQuestion {
   font-weight: 600;
   margin-bottom: var(--space-xs);
-  color: white;
+  color: #2E5A2D;
 }
 
 .faqAnswer {

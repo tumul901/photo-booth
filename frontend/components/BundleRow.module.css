@@ -9,7 +9,7 @@
 .label {
   font-size: 0.8rem;
   font-weight: 600;
-  color: #6b7280;
+  color: #6f8f6d;
   white-space: nowrap;
 }
 
@@ -20,18 +20,18 @@
   background: #f9fafb;
   font-size: 0.85rem;
   font-weight: 600;
-  color: #374151;
+  color: #2E5A2D;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .chip:hover {
-  border-color: #6366f1;
-  background: #f5f3ff;
+  border-color: #4a8f47;
+  background: #f2f8f1;
 }
 
 .chip.active {
-  border-color: #6366f1;
-  background: #ede9fe;
-  color: #4f46e5;
+  border-color: #2E5A2D;
+  background: #e3f0e2;
+  color: #2E5A2D;
 }

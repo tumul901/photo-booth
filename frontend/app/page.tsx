@@ -516,6 +516,13 @@ export default function BoothPage() {
 
   return (
     <main className={styles.main}>
+      {/* Step 1 (StartScreen) already carries its own large hero logo —
+          skip the small corner mark there to avoid showing it twice. */}
+      {step !== 1 && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src="/nestle-logo.png" alt="Nestlé" className={styles.brandLogo} />
+      )}
+
       {/* Step Indicator (hidden on step 1 for cleaner attract screen) */}
       {step > 1 && (
         <div className={styles.stepBar}>
@@ -525,7 +532,7 @@ export default function BoothPage() {
 
       {/* Error Banner */}
       {error && (
-        <div className={styles.error}>⚠️ {error}</div>
+        <div className={styles.error}>{error}</div>
       )}
 
       {/* Step Content */}

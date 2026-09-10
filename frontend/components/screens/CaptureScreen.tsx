@@ -47,13 +47,13 @@ export default function CaptureScreen({
             className={`${styles.toggleBtn} ${captureMode === 'webcam' ? styles.toggleBtnActive : ''}`}
             onClick={() => setCaptureMode('webcam')}
           >
-            📷 Webcam
+            Webcam
           </button>
           <button
             className={`${styles.toggleBtn} ${captureMode === 'upload' ? styles.toggleBtnActive : ''}`}
             onClick={() => setCaptureMode('upload')}
           >
-            📁 Upload
+            Upload
           </button>
         </div>
 

@@ -20,7 +20,7 @@
 .title {
   font-size: 1.25rem;
   font-weight: 700;
-  color: #111827;
+  color: #2E5A2D;
   margin: 0;
 }
 
@@ -49,7 +49,7 @@
   background: transparent;
   font-size: 0.95rem;
   font-weight: 600;
-  color: #374151;
+  color: #2E5A2D;
   cursor: pointer;
   transition: all 0.15s ease;
   display: flex;
@@ -76,7 +76,7 @@
   padding: 0.65rem 1.5rem;
   border-radius: 8px;
   border: none;
-  background: #6366f1;
+  background: #2E5A2D;
   color: #ffffff;
   font-size: 0.95rem;
   font-weight: 700;
@@ -85,7 +85,7 @@
 }
 
 .confirmButton:hover:not(:disabled) {
-  background: #4f46e5;
+  background: #244a23;
 }
 
 .confirmButton:disabled,
@@ -115,7 +115,7 @@
 }
 
 .loading {
-  color: #6b7280;
+  color: #6f8f6d;
   font-size: 1rem;
 }
 
@@ -126,16 +126,16 @@
 }
 
 .emptyText {
-  color: #6b7280;
+  color: #6f8f6d;
   font-size: 1rem;
 }
 
 .retryButton {
   padding: 0.6rem 1.25rem;
   border-radius: 8px;
-  border: 2px solid #6366f1;
+  border: 2px solid #2E5A2D;
   background: transparent;
-  color: #6366f1;
+  color: #2E5A2D;
   font-weight: 700;
   cursor: pointer;
 }
@@ -153,7 +153,7 @@
   border: 1.5px solid #d1d5db;
   background: #fff;
   font-size: 0.95rem;
-  color: #111827;
+  color: #2E5A2D;
   width: 100%;
   box-sizing: border-box;
   transition: border-color 0.15s;
@@ -161,7 +161,7 @@
 
 .overlayInput:focus {
   outline: none;
-  border-color: #6366f1;
+  border-color: #2E5A2D;
 }
 
 .overlayInput:disabled {

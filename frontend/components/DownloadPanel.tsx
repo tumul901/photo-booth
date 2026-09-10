@@ -11,6 +11,51 @@ import { useState, useCallback, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import styles from './DownloadPanel.module.css';
 
+// Inline SVGs rather than an icon library — a handful of glyphs are needed,
+// so a dependency would outweigh what it buys. `currentColor` picks up each
+// button's existing text color, so no separate color prop to thread through.
+function DownloadIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3v12" />
+      <polyline points="7 10 12 15 17 10" />
+      <path d="M5 21h14" />
+    </svg>
+  );
+}
+
+function PrinterIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="6 9 6 3 18 3 18 9" />
+      <rect x="4" y="9" width="16" height="8" rx="1" />
+      <path d="M6 17v4h12v-4" />
+    </svg>
+  );
+}
+
+function ShareIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="18" cy="5" r="3" />
+      <circle cx="6" cy="12" r="3" />
+      <circle cx="18" cy="19" r="3" />
+      <line x1="8.6" y1="10.5" x2="15.4" y2="6.5" />
+      <line x1="8.6" y1="13.5" x2="15.4" y2="17.5" />
+    </svg>
+  );
+}
+
+function LinkIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 17H7a5 5 0 0 1 0-10h2" />
+      <path d="M15 7h2a5 5 0 0 1 0 10h-2" />
+      <line x1="8" y1="12" x2="16" y2="12" />
+    </svg>
+  );
+}
+
 interface DownloadPanelProps {
   downloadUrl: string | null;
   shareUrl: string | null;
@@ -66,8 +111,8 @@ export default function DownloadPanel({
       document.body.removeChild(link);
       showToast(
         transparent
-          ? 'Transparent PNG downloading 📥'
-          : 'Download started! 📥'
+          ? 'Transparent PNG downloading'
+          : 'Download started!'
       );
     } catch (err) {
       console.error('Download failed:', err);
@@ -87,7 +132,7 @@ export default function DownloadPanel({
       } else {
         // Fallback to copy link
         await navigator.clipboard.writeText(shareUrl);
-        showToast('Link copied to clipboard! 📋');
+        showToast('Link copied to clipboard!');
       }
     } catch (err) {
       console.error('Share failed:', err);
@@ -95,7 +140,7 @@ export default function DownloadPanel({
       if (canShare) {
          try {
             await navigator.clipboard.writeText(shareUrl);
-            showToast('Link copied instead! 📋');
+            showToast('Link copied instead!');
          } catch (e) {
             console.error('Copy failed:', e);
          }
@@ -141,7 +186,7 @@ export default function DownloadPanel({
           onClick={handleDownload}
           disabled={!downloadUrl}
         >
-          <span className={styles.actionIcon}>⬇️</span>
+          <span className={styles.actionIcon}><DownloadIcon /></span>
           <span className={styles.actionLabel}>
             {transparent ? 'Download PNG' : 'Download'}
           </span>
@@ -156,7 +201,7 @@ export default function DownloadPanel({
             onClick={handlePrint}
             disabled={!downloadUrl}
           >
-            <span className={styles.actionIcon}>🖨️</span>
+            <span className={styles.actionIcon}><PrinterIcon /></span>
             <span className={styles.actionLabel}>Print</span>
           </button>
         )}
@@ -167,7 +212,7 @@ export default function DownloadPanel({
           onClick={handleShare}
           disabled={!shareUrl}
         >
-          <span className={styles.actionIcon}>{canShare ? '📤' : '🔗'}</span>
+          <span className={styles.actionIcon}>{canShare ? <ShareIcon /> : <LinkIcon />}</span>
           <span className={styles.actionLabel}>{canShare ? 'Share' : 'Copy Link'}</span>
         </button>
       </div>
@@ -184,12 +229,12 @@ export default function DownloadPanel({
         <div className={styles.qrSection}>
           <p className={styles.qrLabel}>Scan to download on your phone</p>
           <div className={styles.qrContainer}>
-            <QRCodeSVG 
+            <QRCodeSVG
               value={downloadUrl || shareUrl}
               size={140}
               level="M"
               bgColor="transparent"
-              fgColor="#ffffff"
+              fgColor="#2E5A2D"
               includeMargin={false}
             />
           </div>

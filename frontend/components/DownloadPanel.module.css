@@ -27,8 +27,8 @@
   justify-content: center;
   gap: 4px;
   padding: 12px 6px;
-  background: rgba(30, 30, 45, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(46, 90, 45, 0.06);
+  border: 1px solid rgba(46, 90, 45, 0.12);
   border-radius: 12px;
   cursor: pointer;
   transition: all var(--transition-base);
@@ -38,8 +38,8 @@
 
 .actionButton:hover,
 .actionButton:active {
-  background: rgba(40, 40, 60, 0.8);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(46, 90, 45, 0.12);
+  border-color: rgba(46, 90, 45, 0.25);
   transform: translateY(-2px);
 }
 
@@ -55,15 +55,19 @@
 }
 
 .actionIcon {
-  font-size: 1.6rem;
-  line-height: 1;
-  filter: drop-shadow(0 4px 6px rgba(0,0,0,0.3));
+  display: flex;
+  color: #2E5A2D;
+}
+
+.actionIcon svg {
+  width: 26px;
+  height: 26px;
 }
 
 .actionLabel {
   font-size: 0.65rem;
   font-weight: 600;
-  color: #fff;
+  color: #2E5A2D;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -92,7 +96,7 @@
 
 .qrContainer {
   padding: var(--space-xs);
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.6);
   border-radius: var(--radius-md);
   border: 1px solid var(--glass-border);
 }
@@ -119,8 +123,9 @@
     gap: 0.4rem;
   }
 
-  .actionIcon {
-    font-size: 2.2rem;
+  .actionIcon svg {
+    width: 34px;
+    height: 34px;
   }
 
   .actionLabel {

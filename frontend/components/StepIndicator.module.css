@@ -21,7 +21,7 @@
 .connector {
   flex: 1;
   height: 2px;
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(46, 90, 45, 0.15);
   margin: 0 4px;
   transition: background var(--transition-slow);
   min-width: 30px;
@@ -47,10 +47,15 @@
   align-items: center;
   justify-content: center;
   font-size: 0.8rem;
-  background: rgba(255, 255, 255, 0.06);
-  border: 2px solid rgba(255, 255, 255, 0.1);
+  background: rgba(46, 90, 45, 0.06);
+  border: 2px solid rgba(46, 90, 45, 0.15);
   color: var(--color-text-muted);
   transition: all var(--transition-slow);
+}
+
+.circle svg {
+  width: 14px;
+  height: 14px;
 }
 
 .label {
@@ -68,7 +73,7 @@
   background: linear-gradient(135deg, var(--color-accent-primary), var(--color-accent-secondary));
   border-color: transparent;
   color: #fff;
-  box-shadow: 0 0 20px rgba(102, 126, 234, 0.4);
+  box-shadow: 0 0 20px rgba(46, 90, 45, 0.4);
   transform: scale(1.1);
 }
 
@@ -98,6 +103,11 @@
     width: 24px;
     height: 24px;
     font-size: 0.7rem;
+  }
+
+  .circle svg {
+    width: 12px;
+    height: 12px;
   }
 
   .label {

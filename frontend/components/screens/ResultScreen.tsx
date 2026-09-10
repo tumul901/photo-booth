@@ -34,7 +34,7 @@ export default function ResultScreen({ result, onStartOver, onAdjustPlacement }:
 
         {/* Action Side */}
         <div className={styles.actionSide}>
-          <h2 className={styles.title}>Your Photo is Ready! 🎉</h2>
+          <h2 className={styles.title}>Your Photo is Ready!</h2>
           <p className={styles.subtitle}>Scan, download, or share your photo</p>
 
           <div className={styles.panelWrapper}>
@@ -53,7 +53,7 @@ export default function ResultScreen({ result, onStartOver, onAdjustPlacement }:
           <div className={styles.footer}>
             {onAdjustPlacement && (
               <button className={styles.adjustButton} onClick={onAdjustPlacement}>
-                ✦ Adjust Sticker Placement
+                Adjust Sticker Placement
               </button>
             )}
             <button className={styles.startOverButton} onClick={onStartOver}>

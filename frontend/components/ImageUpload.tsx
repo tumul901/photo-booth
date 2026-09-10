@@ -18,6 +18,19 @@
 import { useRef, useState, useCallback } from 'react';
 import styles from './ImageUpload.module.css';
 
+// Inline SVG rather than an icon library — one glyph is needed, so a
+// dependency would outweigh what it buys. `currentColor` picks up the
+// dropzone's existing text color, so no separate color prop to thread through.
+function UploadIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 16V4" />
+      <polyline points="7 9 12 4 17 9" />
+      <path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" />
+    </svg>
+  );
+}
+
 interface ImageUploadProps {
   onUpload: (imageData: string) => void;
   onError?: (error: string) => void;
@@ -135,7 +148,7 @@ export default function ImageUpload({
         <div className={styles.previewContainer}>
           <img src={preview} alt="Upload preview" className={styles.preview} />
           <button onClick={clearPreview} className={styles.clearButton}>
-            ✕ Clear
+            Clear
           </button>
         </div>
       ) : (
@@ -146,7 +159,7 @@ export default function ImageUpload({
           onDrop={handleDrop}
           onClick={handleClick}
         >
-          <span className={styles.uploadIcon}>📁</span>
+          <span className={styles.uploadIcon}><UploadIcon /></span>
           <p className={styles.mainText}>
             Drag & drop your photo here
           </p>

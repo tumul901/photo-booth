@@ -85,6 +85,9 @@ export default function PricingPage() {
 
   return (
     <div className={styles.main}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/nestle-logo.png" alt="Nestlé" className={styles.brandLogo} />
+
       {/* Header */}
       <header className={styles.header}>
         <h1 className={styles.title}>Simple, Transparent Pricing</h1>
@@ -132,7 +135,7 @@ export default function PricingPage() {
               <span className={styles.period}>{plan.period}</span>
             </div>
             
-            <p style={{marginBottom: '1.5rem', color: '#a0a0a0', lineHeight: '1.5'}}>{plan.description}</p>
+            <p style={{marginBottom: '1.5rem', color: '#6f8f6d', lineHeight: '1.5'}}>{plan.description}</p>
             
             <ul className={styles.featureList}>
               {plan.features.map((feature, i) => (

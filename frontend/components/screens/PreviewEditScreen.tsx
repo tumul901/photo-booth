@@ -461,7 +461,7 @@ export default function PreviewEditScreen({
           ←<span className={styles.backText}> Back to Camera</span>
         </button>
         <button className={styles.doneButton} onClick={handleDone} disabled={isExtracting || !!error}>
-          ✨ Generate Photo
+          Generate Photo
         </button>
       </div>
 
@@ -474,7 +474,7 @@ export default function PreviewEditScreen({
         )}
         {error && (
           <div className={styles.overlay}>
-            <p className={styles.errorText}>⚠️ {error}</p>
+            <p className={styles.errorText}>{error}</p>
           </div>
         )}
 

@@ -24,7 +24,6 @@
 
 .logoWrapper {
   margin-bottom: var(--space-sm);
-  filter: drop-shadow(0 0 20px rgba(255, 255, 255, 0.2));
 }
 
 .logo {
@@ -33,11 +32,8 @@
 }
 
 .title {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
-  -webkit-text-fill-color: transparent;
+  color: #2E5A2D;
   letter-spacing: -1px;
-  -webkit-background-clip: text;
-  background-clip: text;
   margin: 0;
   font-size: 3.5rem;
   font-weight: 800;
@@ -69,8 +65,8 @@
   align-items: center;
   gap: var(--space-xs);
   padding: var(--space-xl) var(--space-md);
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 253, 246, 0.6);
+  border: 1px solid rgba(46, 90, 45, 0.15);
   border-radius: var(--radius-xl);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -82,9 +78,9 @@
 
 .modeCard:hover {
   transform: translateY(-8px);
-  border-color: rgba(102, 126, 234, 0.5);
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), 0 0 20px rgba(102, 126, 234, 0.2);
-  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(46, 90, 45, 0.5);
+  box-shadow: 0 20px 40px rgba(46, 90, 45, 0.15), 0 0 20px rgba(46, 90, 45, 0.2);
+  background: rgba(255, 253, 246, 0.85);
 }
 
 .modeCard:active {
@@ -92,10 +88,16 @@
 }
 
 .modeIcon {
-  font-size: 3.5rem;
-  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   margin-bottom: var(--space-xs);
-  filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.1));
+  color: #2E5A2D;
+}
+
+.modeIcon svg {
+  width: 48px;
+  height: 48px;
 }
 
 .modeTitle {
@@ -114,7 +116,7 @@
 .bgGlow {
   z-index: 1;
   pointer-events: none;
-  background: radial-gradient(circle, rgba(118, 75, 162, 0.15) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(74, 143, 71, 0.15) 0%, transparent 70%);
   width: 150vw;
   height: 150vw;
   position: absolute;
@@ -159,8 +161,9 @@
     flex: 1 1 140px;
   }
 
-  .modeIcon {
-    font-size: 2.5rem;
+  .modeIcon svg {
+    width: 36px;
+    height: 36px;
   }
 
   .modeTitle {

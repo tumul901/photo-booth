@@ -55,9 +55,22 @@
 }
 
 .cameraIcon {
-  font-size: 3rem;
   margin-bottom: 0.5rem;
   opacity: 0.5;
+}
+
+.cameraIcon svg {
+  width: 48px;
+  height: 48px;
+}
+
+.captureIcon {
+  display: flex;
+}
+
+.captureIcon svg {
+  width: 26px;
+  height: 26px;
 }
 
 .hint {
@@ -74,17 +87,17 @@
   font-size: 1.25rem;
   font-weight: 700;
   color: #fff;
-  background: linear-gradient(135deg, #818cf8 0%, #c084fc 100%);
+  background: linear-gradient(135deg, #2E5A2D 0%, #4a8f47 100%);
   border: none;
   border-radius: 100px;
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-  box-shadow: 0 10px 25px rgba(129, 140, 248, 0.4);
+  box-shadow: 0 10px 25px rgba(46, 90, 45, 0.4);
 }
 
 .captureButton:hover:not(:disabled) {
   transform: translateY(-4px) scale(1.02);
-  box-shadow: 0 15px 35px rgba(129, 140, 248, 0.5);
+  box-shadow: 0 15px 35px rgba(46, 90, 45, 0.5);
 }
 
 .captureButton:active:not(:disabled) {
@@ -172,27 +185,28 @@
   align-items: center;
   gap: 0.25rem;
   padding: 0.5rem 0.75rem;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(46, 90, 45, 0.05);
   border: 2px solid transparent;
   border-radius: 12px;
-  color: #888;
+  color: #6f8f6d;
   cursor: pointer;
   transition: all 0.2s ease;
   min-width: 80px;
 }
 
 .aspectButton:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  background: rgba(46, 90, 45, 0.1);
+  color: #2E5A2D;
 }
 
 .aspectButton.aspectActive {
-  background: rgba(129, 140, 248, 0.1);
-  border-color: #818cf8;
-  color: #fff;
+  background: rgba(46, 90, 45, 0.12);
+  border-color: #2E5A2D;
+  color: #2E5A2D;
 }
 
-.aspectIcon { font-size: 1.5rem; }
+.aspectIcon { display: flex; }
+.aspectIcon svg { width: 24px; height: 24px; }
 .aspectLabel { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; }
 
 /* Template Guide */
@@ -231,8 +245,8 @@
   width: 100%;
   max-width: 400px;
   padding: 0.75rem 1.5rem;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(46, 90, 45, 0.05);
+  border: 1px solid rgba(46, 90, 45, 0.15);
   border-radius: 100px;
   margin-top: -0.5rem;
 }
@@ -240,14 +254,14 @@
 .zoomLabel {
   font-size: 0.8rem;
   font-weight: 800;
-  color: #666;
+  color: #5a7d58;
   text-transform: uppercase;
 }
 
 .zoomValue {
   font-size: 0.9rem;
   font-weight: 700;
-  color: #fff;
+  color: #2E5A2D;
   min-width: 3rem;
 }
 
@@ -256,7 +270,7 @@
   -webkit-appearance: none;
   appearance: none;
   height: 4px;
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(46, 90, 45, 0.15);
   border-radius: 2px;
   outline: none;
 }
@@ -266,7 +280,7 @@
   appearance: none;
   width: 24px;
   height: 24px;
-  background: #fff;
+  background: #2E5A2D;
   border-radius: 50%;
   cursor: pointer;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
@@ -293,8 +307,9 @@
     gap: 0.15rem;
     flex: 1;
   }
-  .aspectIcon {
-    font-size: 1.25rem;
+  .aspectIcon svg {
+    width: 20px;
+    height: 20px;
   }
   .aspectLabel {
     font-size: 0.55rem;

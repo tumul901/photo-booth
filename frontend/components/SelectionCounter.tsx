@@ -20,7 +20,7 @@ export default function SelectionCounter({ selected, max }: SelectionCounterProp
         padding: '0.5rem 1rem',
         borderRadius: '999px',
         display: 'inline-block',
-        color: isFull ? '#16a34a' : isEmpty ? '#9ca3af' : '#374151',
+        color: isFull ? '#2E5A2D' : isEmpty ? '#8fa88d' : '#2E5A2D',
         background: isFull ? '#dcfce7' : isEmpty ? '#f3f4f6' : '#e5e7eb',
         transition: 'all 0.2s ease',
       }}

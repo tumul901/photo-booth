@@ -1,21 +1,22 @@
 :root {
-  /* Colors */
-  --color-bg-primary: #0f0f1a;
-  --color-bg-secondary: #1a1a2e;
-  --color-bg-tertiary: #16213e;
-  --color-text-primary: #e0e0e0;
-  --color-text-secondary: #a0a0a0;
-  --color-text-muted: #707070;
-  --color-accent-primary: #667eea;
-  --color-accent-secondary: #764ba2;
-  --color-accent-tertiary: #f093fb;
+  /* Colors — guest-facing theme (cream + brand green). Admin keeps its own
+     dark palette hardcoded in app/admin/page.module.css, independent of these. */
+  --color-bg-primary: #f3efdf;
+  --color-bg-secondary: #ece5cd;
+  --color-bg-tertiary: #e3dabc;
+  --color-text-primary: #2E5A2D;
+  --color-text-secondary: #4a7248;
+  --color-text-muted: #6f8f6d;
+  --color-accent-primary: #2E5A2D;
+  --color-accent-secondary: #4a8f47;
+  --color-accent-tertiary: #7ab876;
   --color-success: #66ea82;
   --color-error: #ea6666;
-  
+
   /* Glassmorphism - Crisper */
-  --glass-bg: rgba(20, 20, 35, 0.7);
-  --glass-border: rgba(255, 255, 255, 0.15);
-  --glass-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  --glass-bg: rgba(255, 253, 246, 0.75);
+  --glass-border: rgba(46, 90, 45, 0.18);
+  --glass-shadow: 0 4px 24px rgba(46, 90, 45, 0.15);
   
   /* Spacing */
   --space-xs: 0.5rem;
@@ -65,7 +66,7 @@ body {
 }
 
 html {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {

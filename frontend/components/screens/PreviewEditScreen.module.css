@@ -20,7 +20,7 @@
 .backButton {
   background: none;
   border: none;
-  color: #a0a0b0;
+  color: #4a7248;
   font-size: 1rem;
   cursor: pointer;
   transition: color 0.2s;
@@ -35,11 +35,11 @@
 }
 
 .backButton:hover:not(:disabled) {
-  color: white;
+  color: #2E5A2D;
 }
 
 .doneButton {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #2E5A2D 0%, #4a8f47 100%);
   color: white;
   border: none;
   padding: 0.75rem 1.5rem;
@@ -47,12 +47,12 @@
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
-  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+  box-shadow: 0 4px 15px rgba(46, 90, 45, 0.35);
 }
 
 .doneButton:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+  box-shadow: 0 6px 20px rgba(46, 90, 45, 0.45);
 }
 
 .doneButton:disabled, .backButton:disabled {
@@ -64,7 +64,7 @@
   position: relative;
   width: 100%;
   aspect-ratio: 16/9;
-  background: #1a1a2e;
+  background: #e3dabc;
   border-radius: 12px;
   overflow: hidden;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
@@ -128,7 +128,7 @@
   width: 48px;
   height: 48px;
   border: 4px solid rgba(255, 255, 255, 0.1);
-  border-left-color: #667eea;
+  border-left-color: #4a8f47;
   border-radius: 50%;
   animation: spin 1s linear infinite;
   margin-bottom: 1rem;
@@ -150,7 +150,7 @@
   align-items: center;
   gap: 0.5rem;
   padding: 1rem;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(46, 90, 45, 0.06);
   border-radius: 12px;
 }
 
@@ -164,7 +164,7 @@
 
 .sliderGroup span {
   font-size: 0.8rem;
-  color: #aaa;
+  color: #5a7d58;
   text-transform: uppercase;
   letter-spacing: 1px;
 }
@@ -172,12 +172,12 @@
 .slider {
   flex: 1;
   cursor: pointer;
-  accent-color: #667eea;
+  accent-color: #2E5A2D;
 }
 
 .helpText {
   font-size: 0.8rem;
-  color: #888;
+  color: #6f8f6d;
   margin: 0;
 }
 
@@ -226,23 +226,23 @@
 .snapBtn {
   padding: 0.3rem 0.8rem;
   border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  background: rgba(255, 255, 255, 0.06);
-  color: #777;
+  border: 1px solid rgba(46, 90, 45, 0.2);
+  background: rgba(46, 90, 45, 0.05);
+  color: #6f8f6d;
   font-size: 0.78rem;
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .snapBtnActive {
-  border-color: rgba(102, 126, 234, 0.55);
-  background: rgba(102, 126, 234, 0.15);
-  color: #a5b4fc;
+  border-color: rgba(46, 90, 45, 0.55);
+  background: rgba(46, 90, 45, 0.15);
+  color: #2E5A2D;
 }
 
 .snapBtn:hover {
-  border-color: rgba(102, 126, 234, 0.4);
-  color: #c4b5fd;
+  border-color: rgba(46, 90, 45, 0.4);
+  color: #2E5A2D;
 }
 
 .resetBtn {

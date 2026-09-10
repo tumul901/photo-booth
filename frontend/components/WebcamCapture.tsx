@@ -21,22 +21,24 @@ import type { ProcessingMode } from '@/types/processingMode';
 // backend composites the identical file onto the artwork, so what the guest lines
 // up in the viewfinder is exactly what they get.
 
-// Aspect ratio options
+// Aspect ratio options. rectW/rectH are relative proportions (not pixels) —
+// the icon literally draws the aspect ratio it represents, so no separate
+// icon concept is needed per option.
 type AspectRatio = '9:16' | '16:9' | '1:1' | '4:5' | '3:4';
 
-const ASPECT_RATIOS: { id: AspectRatio; label: string; icon: string }[] = [
-  { id: '9:16', label: 'Phone Port.', icon: '📱' },
-  { id: '4:5', label: 'Instagram', icon: '📸' },
-  { id: '1:1', label: 'Square', icon: '⬜' },
-  { id: '3:4', label: 'Classic', icon: '🖼️' },
-  { id: '16:9', label: 'Phone Land.', icon: '🤳' },
+const ASPECT_RATIOS: { id: AspectRatio; label: string; rectW: number; rectH: number }[] = [
+  { id: '9:16', label: 'Phone Port.', rectW: 10, rectH: 20 },
+  { id: '4:5', label: 'Instagram', rectW: 13, rectH: 18 },
+  { id: '1:1', label: 'Square', rectW: 16, rectH: 16 },
+  { id: '3:4', label: 'Classic', rectW: 14.5, rectH: 18 },
+  { id: '16:9', label: 'Phone Land.', rectW: 20, rectH: 10 },
 ];
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
-// Inline SVG rather than an icon library — one glyph is needed, so a dependency
-// would outweigh what it buys. `currentColor` picks up the button's existing
-// `color: white`, so no separate color prop to thread through.
+// Inline SVGs rather than an icon library — a handful of glyphs are needed,
+// so a dependency would outweigh what it buys. `currentColor` picks up each
+// element's existing text color, so no separate color prop to thread through.
 function SwitchCameraIcon() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -45,6 +47,34 @@ function SwitchCameraIcon() {
       <polyline points="18.5 3 18.5 7.5 14 7.5" />
       <path d="M20 12a8 8 0 0 1-14.5 4.5" />
       <polyline points="5.5 21 5.5 16.5 10 16.5" />
+    </svg>
+  );
+}
+
+function AspectIcon({ w, h }: { w: number; h: number }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x={(24 - w) / 2} y={(24 - h) / 2} width={w} height={h} rx="2" />
+    </svg>
+  );
+}
+
+function CameraIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 8a2 2 0 0 1 2-2h1.5l1-1.5h7l1 1.5H18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8z" />
+      <circle cx="12" cy="13" r="3.5" />
+    </svg>
+  );
+}
+
+function CameraOffIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 8a2 2 0 0 1 2-2h1.5l1-1.5h7l1 1.5H18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-1" />
+      <path d="M9.5 19H6a2 2 0 0 1-2-2v-6.5" />
+      <circle cx="12" cy="13" r="3.5" />
+      <line x1="3" y1="3" x2="21" y2="21" />
     </svg>
   );
 }
@@ -305,7 +335,7 @@ export default function WebcamCapture({
               className={`${styles.aspectButton} ${aspectRatio === ar.id ? styles.aspectActive : ''}`}
               onClick={() => setAspectRatio(ar.id)}
             >
-              <span className={styles.aspectIcon}>{ar.icon}</span>
+              <span className={styles.aspectIcon}><AspectIcon w={ar.rectW} h={ar.rectH} /></span>
               <span className={styles.aspectLabel}>{ar.label}</span>
             </button>
           ))}
@@ -326,14 +356,14 @@ export default function WebcamCapture({
 
         {error && (
           <div className={styles.placeholder}>
-            <span className={styles.cameraIcon}>🚫</span>
+            <span className={styles.cameraIcon}><CameraOffIcon /></span>
             <p className={styles.hint}>{error}</p>
           </div>
         )}
-        
+
         {!isReady && !error && (
           <div className={styles.placeholder}>
-            <span className={styles.cameraIcon}>📷</span>
+            <span className={styles.cameraIcon}><CameraIcon /></span>
             <p>Initializing...</p>
           </div>
         )}
@@ -389,7 +419,7 @@ export default function WebcamCapture({
       </div>
 
       <button className={styles.captureButton} onClick={startCountdown} disabled={!isReady || countdown !== null}>
-        <span className={styles.captureIcon}>📸</span>
+        <span className={styles.captureIcon}><CameraIcon /></span>
         {countdown !== null ? 'Ready...' : 'Capture Photo'}
       </button>
 
