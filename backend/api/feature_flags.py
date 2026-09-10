@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from typing import Any
 
 from services.cloud_rembg import is_configured as cloud_rembg_configured
+from services.selfhost_rembg import is_configured as selfhost_rembg_configured
 from services.feature_flags_service import (
     get_flags,
     save_flags,
@@ -50,6 +51,8 @@ async def admin_get_flags():
         # False means a cloud_birefnet_* profile would silently run local — the
         # panel warns instead of leaving the operator guessing.
         "cloud_rembg_configured": cloud_rembg_configured(),
+        # Same, for the selfhost_birefnet profile and BG_SERVICE_URL.
+        "selfhost_rembg_configured": selfhost_rembg_configured(),
     }
 
 

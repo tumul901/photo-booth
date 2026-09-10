@@ -56,15 +56,19 @@ const PROFILE_DETAIL: Record<string, { label: string; desc: string }> = {
   },
   cloud_birefnet_portrait: {
     label: '☁ BiRefNet Portrait (fal.ai)',
-    desc: 'GPU BiRefNet tuned for portraits — a generation ahead of the local models on hair and fine edges. ~2–4 s per cutout, well under ₹1. Falls back to human_hi automatically if fal.ai is unreachable.',
+    desc: 'GPU BiRefNet tuned for portraits — a generation ahead of the local models on hair and fine edges. ~2–4 s per cutout, well under ₹1. Falls back to isnet_max automatically if fal.ai is unreachable.',
   },
   cloud_birefnet_matting: {
     label: '☁ BiRefNet Matting (fal.ai) — recommended',
-    desc: 'GPU BiRefNet trained on human matting data — the best all-rounder for a people booth, and the most forgiving when guests hold props or crowd the frame. ~2–4 s per cutout. Falls back to human_hi automatically if fal.ai is unreachable.',
+    desc: 'GPU BiRefNet trained on human matting data — the best all-rounder for a people booth, and the most forgiving when guests hold props or crowd the frame. ~2–4 s per cutout. Falls back to isnet_max automatically if fal.ai is unreachable.',
   },
   cloud_birefnet_general: {
     label: '☁ BiRefNet General, Heavy (fal.ai)',
     desc: 'GPU BiRefNet general-purpose heavy variant. Most robust when the shot is not a clean portrait — props, several people, odd framing.',
+  },
+  selfhost_birefnet: {
+    label: '⚡ BiRefNet Matting (our GPU box)',
+    desc: 'The same model as the fal.ai Matting profile, running on our own EC2 GPU instead of a paid API — no per-photo cost and nothing leaves our infrastructure. Usually the fastest option too (~1–4 s). Falls back to the local model automatically if the box is unreachable or restarting.',
   },
 };
 
@@ -97,6 +101,7 @@ export default function FeatureFlagsPanel({ apiBaseUrl }: FeatureFlagsPanelProps
   const [effects, setEffects] = useState<string[]>([]);
   // Assume configured until the API says otherwise, so the warning never flashes on load.
   const [cloudConfigured, setCloudConfigured] = useState(true);
+  const [selfhostConfigured, setSelfhostConfigured] = useState(true);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -116,6 +121,7 @@ export default function FeatureFlagsPanel({ apiBaseUrl }: FeatureFlagsPanelProps
         setProfiles(data.available_rembg_profiles || []);
         setEffects(data.available_sticker_effects || []);
         setCloudConfigured(data.cloud_rembg_configured !== false);
+        setSelfhostConfigured(data.selfhost_rembg_configured !== false);
         setError(null);
       })
       .catch((e) => {
@@ -245,8 +251,16 @@ export default function FeatureFlagsPanel({ apiBaseUrl }: FeatureFlagsPanelProps
         {!cloudConfigured && (
           <p className={styles.cloudWarning}>
             ⚠️ No <code>FAL_KEY</code> configured — the ☁ cloud profiles below will fall back to{' '}
-            <strong>human_hi</strong> on every photo. Add <code>FAL_KEY</code> to <code>backend/.env</code>{' '}
+            <strong>isnet_max</strong> on every photo. Add <code>FAL_KEY</code> to <code>backend/.env</code>{' '}
             and restart the backend to enable them.
+          </p>
+        )}
+        {!selfhostConfigured && (
+          <p className={styles.cloudWarning}>
+            ⚠️ No <code>BG_SERVICE_URL</code> configured — the ⚡ our-GPU-box profile below will fall
+            back to <strong>isnet_max</strong> on every photo. Add <code>BG_SERVICE_URL</code> (the
+            load balancer address, not an instance IP) to <code>backend/.env</code> and restart the
+            backend to enable it.
           </p>
         )}
         <div className={styles.list}>

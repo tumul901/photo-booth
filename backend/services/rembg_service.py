@@ -23,8 +23,14 @@ Cloud (fal.ai BiRefNet v2 on GPU, ~2-4 s, needs FAL_KEY — see cloud_rembg.py):
                      from the admin panel rather than a code change. Each falls
                      back to the local pipeline automatically if fal is unusable.
 
+Self-hosted (our own BiRefNet GPU box behind an NLB — see selfhost_rembg.py):
+  - "selfhost_birefnet"
+                     Same model family and quality as the fal Matting profile, on
+                     hardware we own: no per-photo cost and no third-party uplink.
+                     Needs BG_SERVICE_URL; falls back to local like the rest.
+
 Local profiles run a small Gaussian alpha-feather pass to smooth stair-step edges
-from the segmentation network. Cloud results skip it — BiRefNet's refine_foreground
+from the segmentation network. Remote results skip it — BiRefNet's refine_foreground
 already returns matted, decontaminated edges.
 
 Sessions are cached per model. Switching profiles at runtime lazily loads the
@@ -42,6 +48,7 @@ from PIL import Image, ImageFilter
 from rembg import new_session, remove
 
 from services.cloud_rembg import CloudRembgError, remove_background_cloud
+from services.selfhost_rembg import remove_background_selfhost
 from services.feature_flags_service import get_rembg_profile, get_sticker_effect, get_sticker_stroke_color, get_sticker_stroke_width, get_edge_cleanup
 from services.sticker_effects import (
     apply_drop_shadow,
@@ -97,7 +104,7 @@ PROFILES: dict[str, dict] = {
 
 # --- Cloud profiles (fal.ai BiRefNet v2, GPU) ---------------------------------
 # Three variants so the winner can be picked by A/B from the admin panel instead
-# of a code change. Each inherits human_hi's local settings: that is what the
+# of a code change. Each inherits isnet_max's local settings: that is what the
 # automatic fallback runs when fal is unconfigured / unreachable / circuit-broken,
 # and what warm_up() pre-loads, so selecting a cloud profile still boots a usable
 # local model.
@@ -118,6 +125,17 @@ PROFILES.update(
         for name, fal_model in _CLOUD_VARIANTS.items()
     }
 )
+
+# --- Self-hosted profile (our BiRefNet GPU box) -------------------------------
+# BiRefNet-matting, the same weights as cloud_birefnet_matting, on a box we own.
+# Only one entry because there is nothing to A/B: the box serves one model, and
+# which one it serves is a deploy decision there, not a booth setting here.
+# Inherits isnet_max's local settings for the same reason the cloud profiles do —
+# that is what runs when the box is unreachable.
+PROFILES["selfhost_birefnet"] = {
+    **PROFILES["isnet_max"],
+    "selfhost": True,
+}
 
 DEFAULT_PROFILE = "isnet_max"
 
@@ -293,6 +311,30 @@ class BackgroundRemovalService:
             "fal_model": cm["fal_model"],
         }
 
+    @staticmethod
+    def _infer_selfhost(input_image: Image.Image) -> tuple[Image.Image, dict]:
+        """Our own BiRefNet box. Raises SelfhostRembgError (a CloudRembgError),
+        so the caller's existing fall-back-to-local catch covers it."""
+        raw_out, sm = remove_background_selfhost(input_image)
+        return raw_out, {
+            "source": "selfhost",
+            "downsize_ms": sm["encode_ms"],
+            "did_downsize": sm["did_downsize"],
+            "input_size": sm["input_size"],
+            "input_megapixels": sm["input_megapixels"],
+            "inference_ms": sm["request_ms"],
+            "upload_kb": sm["upload_kb"],
+            "ttfb_ms": sm["ttfb_ms"],
+            "download_ms": sm["download_ms"],
+            "decode_ms": sm["decode_ms"],
+            # Self-host only: which box answered, what it spent on the GPU alone,
+            # and whether the compact split body actually came back.
+            "served_by": sm["served_by"],
+            "box_inference_ms": sm["box_inference_ms"],
+            "wire_format": sm["wire_format"],
+            "download_kb": sm["download_kb"],
+        }
+
     def _remove_sync(self, input_image: Image.Image, profile: dict) -> tuple[Image.Image, dict]:
         """
         Synchronous removal. Returns (output_image, metrics_dict).
@@ -305,14 +347,19 @@ class BackgroundRemovalService:
         use_alpha_matting = (effect == "alpha_matting")
         metrics["effect"] = effect
 
-        # 1+2) downsize + inference. Cloud profiles try fal first; *any* failure
-        # (no key, open breaker, timeout, bad response) drops through to the local
-        # pipeline, so a bad venue uplink costs quality but never stalls the booth.
+        # 1+2) downsize + inference. Remote profiles try their GPU first; *any*
+        # failure (unconfigured, open breaker, timeout, bad response) drops through
+        # to the local pipeline, so a bad venue uplink or a rebooting box costs
+        # quality but never stalls the booth. SelfhostRembgError subclasses
+        # CloudRembgError, so one catch covers both remotes.
         raw_out = None
-        if profile.get("cloud"):
+        if profile.get("cloud") or profile.get("selfhost"):
             try:
-                raw_out, cloud_metrics = self._infer_cloud(input_image, profile)
-                metrics.update(cloud_metrics)
+                if profile.get("selfhost"):
+                    raw_out, remote_metrics = self._infer_selfhost(input_image)
+                else:
+                    raw_out, remote_metrics = self._infer_cloud(input_image, profile)
+                metrics.update(remote_metrics)
             except CloudRembgError as exc:
                 print(f"CLOUD-FALLBACK reason={exc}", flush=True)
                 metrics["cloud_fallback_reason"] = str(exc)
@@ -321,10 +368,13 @@ class BackgroundRemovalService:
             raw_out, local_metrics = self._infer_local(input_image, profile, use_alpha_matting)
             metrics.update(local_metrics)
 
-        from_cloud = metrics["source"] == "cloud"
-        # alpha_matting exists only on the rembg path; on a cloud result the
+        # Both remotes run BiRefNet with refine_foreground, so both arrive already
+        # matted — the distinction that matters below is remote-vs-local, not which
+        # remote it was.
+        from_remote = metrics["source"] != "local"
+        # alpha_matting exists only on the rembg path; on a remote result the
         # equivalent (refine_foreground) already ran server-side.
-        matting_applied = use_alpha_matting and not from_cloud
+        matting_applied = use_alpha_matting and not from_remote
 
         # 2b) pre-feather alpha metrics (what the model itself produced)
         pre = self._alpha_metrics(raw_out)
@@ -332,10 +382,10 @@ class BackgroundRemovalService:
         metrics["pre_feather_edge_pct"] = pre.get("edge_pct", 0.0)
 
         # 3) feather — skipped whenever the edges are already properly matted:
-        # alpha_matting output, or a cloud result (refine_foreground). Blurring
+        # alpha_matting output, or a remote result (refine_foreground). Blurring
         # those would only wash out what we paid for.
         t0 = time.perf_counter()
-        if matting_applied or from_cloud:
+        if matting_applied or from_remote:
             out = raw_out
         else:
             out = self._feather_alpha(raw_out, profile.get("alpha_feather", 0.0))
@@ -345,12 +395,12 @@ class BackgroundRemovalService:
         # 3b) edge cleanup (background-independent): drop segmentation ghosts and
         # recolor the soft edge ring with the subject's own colour so no old-background
         # halo survives onto the new template. Cheap (~tens of ms). Default ON.
-        # On cloud results only the island sweep runs — cheap insurance against stray
+        # On remote results only the island sweep runs — cheap insurance against stray
         # blobs — since refine_foreground already decontaminated the edge ring.
         t0 = time.perf_counter()
         if get_edge_cleanup() and not matting_applied:
             out = clean_alpha_islands(out, low_alpha_cut=12, min_area_frac=0.02)
-            if not from_cloud:
+            if not from_remote:
                 out = decontaminate_edges(out, grow=4, shrink=1)
         metrics["cleanup_ms"] = (time.perf_counter() - t0) * 1000
 
@@ -399,29 +449,46 @@ class BackgroundRemovalService:
         # Run CPU work in a thread
         out, m = await asyncio.to_thread(self._remove_sync, input_image, profile)
 
-        # A cloud run reports upload size + result-decode time; a cloud profile that
-        # fell back to local reports why, so `grep CLOUD-FALLBACK` and the PERF line
-        # tell the same story.
-        if m["source"] == "cloud":
-            cloud_bits = (
+        # A remote run reports upload size + result-decode time; a remote profile
+        # that fell back to local reports why, so `grep CLOUD-FALLBACK` and the PERF
+        # line tell the same story.
+        if m["source"] == "local":
+            remote_bits = f"cloud_fallback='{m['cloud_fallback_reason']}' " if m.get("cloud_fallback_reason") else ""
+        else:
+            remote_bits = (
                 f"upload={m['upload_kb']:.0f}KB ttfb={m['ttfb_ms']:.0f}ms "
                 f"download={m['download_ms']:.0f}ms result_decode={m['decode_ms']:.0f}ms "
             )
-        elif m.get("cloud_fallback_reason"):
-            cloud_bits = f"cloud_fallback='{m['cloud_fallback_reason']}' "
+            # Self-host only. served_by is the whole point of running behind an
+            # NLB: sample it across photos and one hostname where two are expected
+            # means half the fleet is missing, which is otherwise invisible.
+            if m["source"] == "selfhost":
+                remote_bits += (
+                    f"served_by={m['served_by']} box_inference={m['box_inference_ms']}ms "
+                    f"wire={m['wire_format']}/{m['download_kb']:.0f}KB "
+                )
+
+        # `model=` must name what actually ran, not what the profile would have
+        # used: on a fallback the profile still says BiRefNet while the cutout came
+        # from the local model, and a PERF line that lies about that is worse than
+        # no PERF line. Self-host serves BiRefNet-matting by deploy, not by request.
+        if m["source"] == "cloud":
+            model_label = m["fal_model"]
+        elif m["source"] == "selfhost":
+            model_label = "BiRefNet-matting"
         else:
-            cloud_bits = ""
+            model_label = profile["model"]
 
         # Two-line log: timing first (easy to grep), then quality metrics.
         print(
             f"PERF [rembg] profile={profile_name} source={m['source']} "
-            f"model={m.get('fal_model') or profile['model']} feather={profile['alpha_feather']} "
+            f"model={model_label} feather={profile['alpha_feather']} "
             f"effect={m['effect']} "
             f"orig={original_size} -> input={m['input_size']} ({m['input_megapixels']:.2f}MP) "
             f"| decode={decode_ms:.0f}ms downsize={m['downsize_ms']:.0f}ms "
             f"inference={m['inference_ms']:.0f}ms feather={m['feather_ms']:.0f}ms "
             f"cleanup={m.get('cleanup_ms', 0):.0f}ms effect={m['effect_ms']:.0f}ms "
-            f"{cloud_bits}"
+            f"{remote_bits}"
             f"TOTAL={m['total_ms']:.0f}ms",
             flush=True,
         )

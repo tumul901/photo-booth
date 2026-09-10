@@ -1,0 +1,30 @@
+{
+  "template_id": "nestle-wtm",
+  "name": "nestle-wtm",
+  "mode": "word_template",
+  "base_image": "base.png",
+  "dimensions": {
+    "width": 1200,
+    "height": 1800
+  },
+  "slots": [],
+  "words": [],
+  "bundles": [],
+  "max_selections": 6,
+  "allow_manual_positioning": true,
+  "created_at": "2026-09-10T12:10:47.396936+00:00",
+  "updated_at": "2026-09-10T12:28:37.239984+00:00",
+  "photo_slot": {
+    "x": 78,
+    "y": 154,
+    "width": 1043,
+    "height": 1641,
+    "anchor_x": 0.5,
+    "anchor_y": 0.35,
+    "anchor_mode": "none",
+    "desired_face_ratio": 0.35,
+    "min_zoom": 0.5,
+    "max_zoom": 3.0,
+    "sticker_filter": "none"
+  }
+}

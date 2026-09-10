@@ -57,8 +57,13 @@ class CloudRembgError(RuntimeError):
     """Any cloud failure. Always caught by rembg_service, which falls back local."""
 
 
-class _CircuitBreaker:
-    """Trips after N consecutive failures, then half-opens after a cool-down."""
+class CircuitBreaker:
+    """Trips after N consecutive failures, then half-opens after a cool-down.
+
+    Public because selfhost_rembg needs the same behaviour against its own box —
+    one breaker per remote backend, never shared, so a dead fal.ai cannot switch
+    off a healthy GPU box or the reverse.
+    """
 
     def __init__(self, threshold: int, cooldown_s: float):
         self._threshold = threshold
@@ -96,7 +101,7 @@ class _CircuitBreaker:
                 )
 
 
-_breaker = _CircuitBreaker(_BREAKER_THRESHOLD, _BREAKER_COOLDOWN_S)
+_breaker = CircuitBreaker(_BREAKER_THRESHOLD, _BREAKER_COOLDOWN_S)
 
 
 def is_configured() -> bool:

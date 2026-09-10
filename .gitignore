@@ -22,6 +22,10 @@ outputs/*
 backend/models/selfie_multiclass_256x256.tflite
 backend/models/face_landmarker.task
 
+# Cartoon styliser candidates (~62MB of ONNX), re-fetchable from HuggingFace —
+# see docs/cartoon-model-eval.md for the exact repos and filenames.
+backend/models/cartoon/
+
 # Environment
 .env
 .env.local

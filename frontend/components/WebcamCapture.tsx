@@ -34,6 +34,21 @@ const ASPECT_RATIOS: { id: AspectRatio; label: string; icon: string }[] = [
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
+// Inline SVG rather than an icon library — one glyph is needed, so a dependency
+// would outweigh what it buys. `currentColor` picks up the button's existing
+// `color: white`, so no separate color prop to thread through.
+function SwitchCameraIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 12a8 8 0 0 1 14.5-4.5" />
+      <polyline points="18.5 3 18.5 7.5 14 7.5" />
+      <path d="M20 12a8 8 0 0 1-14.5 4.5" />
+      <polyline points="5.5 21 5.5 16.5 10 16.5" />
+    </svg>
+  );
+}
+
 interface WebcamCaptureProps {
   selectedTemplate?: string;
   onCapture: (imageData: string) => void;
@@ -72,6 +87,13 @@ export default function WebcamCapture({
   const [zoom, setZoom] = useState(1);
   const [zoomRange, setZoomRange] = useState({ min: 1, max: 1 });
   const [hasZoom, setHasZoom] = useState(false);
+
+  // Always mirrored, no per-guest toggle — a selfie-style preview that moves
+  // opposite to what the guest expects is disorienting, and facingMode isn't a
+  // reliable enough signal to gate it on (a single-camera laptop grants its only
+  // camera regardless of the requested 'environment' hint, so facingMode never
+  // reflects whether the feed is actually a front-facing selfie).
+  const isMirrored = mirrored;
 
   // Helper to toggle between front/back cameras
   const toggleCamera = useCallback(() => {
@@ -247,9 +269,9 @@ export default function WebcamCapture({
     
     canvas.width = sW;
     canvas.height = sH;
-    
-    // Handle Mirroring
-    const isMirrored = mirrored && facingMode === 'user';
+
+    // Mirror to match the live preview exactly — whatever the guest saw
+    // lined up in the viewfinder is what they should get back.
     if (isMirrored) {
       ctx.translate(canvas.width, 0);
       ctx.scale(-1, 1);
@@ -258,7 +280,7 @@ export default function WebcamCapture({
     ctx.drawImage(video, sX, sY, sW, sH, 0, 0, sW, sH);
 
     onCapture(canvas.toDataURL('image/jpeg', 0.92));
-  }, [mirrored, onCapture, aspectRatio, facingMode, getAspectRatioValue]);
+  }, [isMirrored, onCapture, aspectRatio, getAspectRatioValue]);
 
   const startCountdown = useCallback(() => setCountdown(3), []);
 
@@ -295,7 +317,11 @@ export default function WebcamCapture({
         style={{ aspectRatio: `${getAspectRatioValue(aspectRatio)}` }}
       >
         {isReady && !error && (
-          <button className={styles.flipButton} onClick={toggleCamera}>🔄</button>
+          <div className={styles.topControls}>
+            <button className={styles.flipButton} onClick={toggleCamera} aria-label="Switch camera">
+              <SwitchCameraIcon />
+            </button>
+          </div>
         )}
 
         {error && (
@@ -345,8 +371,8 @@ export default function WebcamCapture({
                   ? `${API_BASE_URL}/api/admin/wtm/templates/${selectedTemplate}/image`
                   : `${API_BASE_URL}/api/admin/templates/${selectedTemplate}/image`
               }
-              alt="Guide" 
-              className={`${styles.guideImage} ${mirrored && facingMode === 'user' ? styles.mirrored : ''}`} 
+              alt="Guide"
+              className={`${styles.guideImage} ${isMirrored ? styles.mirrored : ''}`}
             />
           </div>
         )}
@@ -356,7 +382,7 @@ export default function WebcamCapture({
           autoPlay
           playsInline
           muted
-          className={`${styles.video} ${mirrored && facingMode === 'user' ? styles.mirrored : ''}`}
+          className={`${styles.video} ${isMirrored ? styles.mirrored : ''}`}
           style={{ display: isReady && !error ? 'block' : 'none' }}
         />
         <canvas ref={canvasRef} style={{ display: 'none' }} />

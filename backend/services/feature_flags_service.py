@@ -64,6 +64,8 @@ PROFILES_NAMES = (
     "cloud_birefnet_portrait",
     "cloud_birefnet_matting",
     "cloud_birefnet_general",
+    # Our own BiRefNet GPU box. Same deal without a BG_SERVICE_URL.
+    "selfhost_birefnet",
 )
 
 # Valid sticker edge effect names. Mirror of sticker_effects.EFFECT_NAMES; duplicated
