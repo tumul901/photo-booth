@@ -193,6 +193,7 @@ async def wtm_generate(
                 max_zoom=ps.get('max_zoom', 3.0),
             )],
             anchor_mode=ps.get('anchor_mode', 'face_center'),
+            baseline=ps.get('baseline'),
             width=w,
             height=h,
             template_type='sticker',

@@ -14,6 +14,7 @@ from services.jobs_service import jobs_service
 from config import settings
 from pydantic import BaseModel
 import services.compose as compose_service
+from utils.wtm_utils import FONTS_DIR
 
 router = APIRouter()
 
@@ -843,7 +844,14 @@ async def get_fg_image(template_id: str):
 @router.get("/fonts")
 async def list_fonts():
     """List available custom fonts from backend/fonts/ directory."""
-    fonts_dir = os.path.join(PROJECT_ROOT, "backend", "fonts")
+    # Shared with WTM's font system (utils/wtm_utils.py) — this used to be computed
+    # independently here as PROJECT_ROOT + "backend" + "fonts", which is wrong in
+    # Docker: PROJECT_ROOT resolves to the image root (backend/'s CONTENTS become
+    # /app directly, there's no /app/backend), so it silently pointed at an unmounted,
+    # nonexistent /backend/fonts — invisible to wtm_utils' correctly-anchored /app/fonts,
+    # and to anything actually shipped in the image. A single shared constant makes the
+    # two paths structurally incapable of diverging again.
+    fonts_dir = str(FONTS_DIR)
     fonts = []
     if os.path.isdir(fonts_dir):
         for fname in sorted(os.listdir(fonts_dir)):
@@ -860,7 +868,7 @@ async def upload_font(file: UploadFile = File(...)):
     available to the template editor (preview) and the compositor (final render).
     Returns the font stem name to select in the UI.
     """
-    fonts_dir = os.path.join(PROJECT_ROOT, "backend", "fonts")
+    fonts_dir = str(FONTS_DIR)  # see list_fonts() above for why this must be shared, not recomputed
     os.makedirs(fonts_dir, exist_ok=True)
 
     orig = os.path.basename(file.filename or "")
@@ -900,7 +908,7 @@ async def get_font_file(font_name: str):
     the exact typeface the backend composites with (true WYSIWYG placement).
     Matched case-insensitively on the font stem (e.g. "Roboto-Bold").
     """
-    fonts_dir = os.path.join(PROJECT_ROOT, "backend", "fonts")
+    fonts_dir = str(FONTS_DIR)  # see list_fonts() above for why this must be shared, not recomputed
     if os.path.isdir(fonts_dir):
         target = font_name.lower()
         for fname in os.listdir(fonts_dir):

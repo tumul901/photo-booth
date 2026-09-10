@@ -75,11 +75,16 @@ class PhotoSlotDefinition(BaseModel):
     height: int = Field(..., ge=50)
     anchor_x: float = Field(0.5, ge=0.0, le=1.0)   # relative within slot
     anchor_y: float = Field(0.35, ge=0.0, le=1.0)  # relative within slot
-    anchor_mode: str = Field('face_center')          # face_center | eyes | none | full_frame
+    anchor_mode: str = Field('face_center')          # face_center | eyes | none | full_frame | baseline
     desired_face_ratio: float = Field(0.35, gt=0.0, le=1.0)
     min_zoom: float = Field(0.5, gt=0.0)
     max_zoom: float = Field(3.0, gt=0.0)
     sticker_filter: str = Field('none')              # none | bw | sketch
+    # Baseline placement (anchor_mode == "baseline") — same shape and meaning as
+    # TemplateMetadata.baseline in services/compose.py: one horizontal segment
+    # {x1, x2, y} in template-native px. Untyped dict to match how compose.py
+    # already consumes it there (duck-typed .get() calls), not a new contract.
+    baseline: Optional[dict] = None
 
 class SavePhotoSlotRequest(BaseModel):
     photo_slot: PhotoSlotDefinition

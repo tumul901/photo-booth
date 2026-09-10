@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import styles from './WTMSlotEditor.module.css';
-import { WTMTemplateConfig, SlotDefinition, PhotoSlotDefinition, TextOverlayConfig } from '@/types/wtm';
+import { WTMTemplateConfig, SlotDefinition, PhotoSlotDefinition, TextOverlayConfig, Baseline } from '@/types/wtm';
 
 interface WTMSlotEditorProps {
   config: WTMTemplateConfig;
@@ -12,7 +12,7 @@ interface WTMSlotEditorProps {
 }
 
 type EditorTab = 'words' | 'photo' | 'settings' | 'text';
-type PhotoEditorMode = 'draw' | 'anchor' | 'select';
+type PhotoEditorMode = 'draw' | 'anchor' | 'select' | 'baseline';
 
 const DEFAULT_PHOTO_SLOT: Omit<PhotoSlotDefinition, 'x' | 'y' | 'width' | 'height'> = {
   anchor_x: 0.5,
@@ -73,6 +73,18 @@ const WTMSlotEditor: React.FC<WTMSlotEditorProps> = ({ config, apiBaseUrl, onSav
   const [photoDirty, setPhotoDirty] = useState(false);
   const [photoSaving, setPhotoSaving] = useState(false);
   const [photoSaveError, setPhotoSaveError] = useState<string | null>(null);
+
+  // ── Baseline placement (mirrors TemplateEditor.tsx's baseline tool) ─────
+  // Kept as its own state rather than nested in `photoSlot` during editing —
+  // same separation the reference implementation uses, and it avoids rebuilding
+  // the whole photoSlot object on every drag-move pixel. Merged into photoSlot
+  // only at save time (see handleSavePhotoSlot).
+  const [baseline, setBaseline] = useState<Baseline | null>(config.photo_slot?.baseline ?? null);
+  const [baselineDraft, setBaselineDraft] = useState<Baseline | null>(null);
+  const isDrawingBaseline = useRef(false);
+  const [draggingBaseline, setDraggingBaseline] = useState<null | 'move' | 'x1' | 'x2'>(null);
+  const [baselineHover, setBaselineHover] = useState<null | 'move' | 'x1' | 'x2'>(null);
+  const baselineDragRef = useRef<{ grabX: number; grabY: number; orig: Baseline } | null>(null);
 
   // ── Template settings ────────────────────────────────────────────────────
   const [allowManualPositioning, setAllowManualPositioning] = useState(config.allow_manual_positioning ?? true);
@@ -217,6 +229,34 @@ const WTMSlotEditor: React.FC<WTMSlotEditorProps> = ({ config, apiBaseUrl, onSav
         ctx.moveTo(ax, ay - 14); ctx.lineTo(ax, ay + 14);
         ctx.stroke();
       }
+
+      // Baseline (green) — draft while drawing takes precedence over the committed one
+      const blToDraw = baselineDraft || baseline;
+      if (blToDraw) {
+        const bx1 = blToDraw.x1 * scale, bx2 = blToDraw.x2 * scale, by = blToDraw.y * scale;
+        const blActive = !!(draggingBaseline || baselineHover);
+        ctx.strokeStyle = '#22ff88';
+        ctx.lineWidth = blActive ? 3 : 2;
+        ctx.beginPath();
+        ctx.moveTo(bx1, by); ctx.lineTo(bx2, by);
+        ctx.stroke();
+
+        (['x1', 'x2'] as const).forEach((key) => {
+          const hx = key === 'x1' ? bx1 : bx2;
+          const isActiveEnd = draggingBaseline === key || baselineHover === key;
+          ctx.beginPath();
+          ctx.arc(hx, by, isActiveEnd ? 8 : 6, 0, Math.PI * 2);
+          ctx.fillStyle = '#22ff88';
+          ctx.fill();
+          ctx.strokeStyle = '#000';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        });
+
+        ctx.fillStyle = '#22ff88';
+        ctx.font = 'bold 12px sans-serif';
+        ctx.fillText('📏 baseline', Math.min(bx1, bx2) + 4, by - 8);
+      }
     }
 
     // In-progress rectangle while dragging (words / photo tabs only)
@@ -271,9 +311,39 @@ const WTMSlotEditor: React.FC<WTMSlotEditorProps> = ({ config, apiBaseUrl, onSav
       if (desigEnabled) drawTextMarker(desigCfg, 'DESIGNATION', '#4ade80', draggingText === 'designation');
     }
   }, [slots, selectedSlotIndex, photoSlot, scale, isDrawing, wordsDragMode, drawStart, drawCurrent, tab,
-      nameEnabled, nameCfg, desigEnabled, desigCfg, draggingText]);
+      nameEnabled, nameCfg, desigEnabled, desigCfg, draggingText,
+      baseline, baselineDraft, draggingBaseline, baselineHover]);
 
   useEffect(() => { redrawCanvas(); }, [redrawCanvas]);
+
+  // ── Baseline helpers (mirrors TemplateEditor.tsx, minus the snap-flash
+  // visual — functional parity, not the animation polish) ─────────────────
+  const snapBaselineToEdges = (b: Baseline): Baseline => {
+    const W = config.dimensions.width, H = config.dimensions.height;
+    const t = Math.max(8, Math.round(Math.min(W, H) * 0.02));
+    const xT = [0, W, W / 2, W / 3, (2 * W) / 3, W / 4, (3 * W) / 4];
+    const yT = [0, H, H / 2, H / 3, (2 * H) / 3, H / 4, (3 * H) / 4];
+    const snap = (v: number, targets: number[]) => {
+      let best = v, bestD = t;
+      for (const tgt of targets) {
+        const d = Math.abs(v - tgt);
+        if (d < bestD) { bestD = d; best = Math.round(tgt); }
+      }
+      return best;
+    };
+    return { x1: snap(b.x1, xT), x2: snap(b.x2, xT), y: snap(b.y, yT) };
+  };
+
+  const hitTestBaseline = (imgX: number, imgY: number): 'move' | 'x1' | 'x2' | null => {
+    if (!baseline) return null;
+    const handleR = 11 / scale;
+    const lineTol = 7 / scale;
+    if (Math.hypot(imgX - baseline.x1, imgY - baseline.y) <= handleR) return 'x1';
+    if (Math.hypot(imgX - baseline.x2, imgY - baseline.y) <= handleR) return 'x2';
+    const lx = Math.min(baseline.x1, baseline.x2), rx = Math.max(baseline.x1, baseline.x2);
+    if (imgX >= lx - lineTol && imgX <= rx + lineTol && Math.abs(imgY - baseline.y) <= lineTol) return 'move';
+    return null;
+  };
 
   // ── Mouse coords ────────────────────────────────────────────────────────
   const getImgCoords = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -335,7 +405,23 @@ const WTMSlotEditor: React.FC<WTMSlotEditorProps> = ({ config, apiBaseUrl, onSav
       return;
     } else {
       // Photo slot tab
-      if (photoMode === 'draw') {
+
+      // Grab an existing baseline to move (line body) or resize (endpoint) —
+      // works in any photo-tab mode, same as TemplateEditor.tsx, so you don't
+      // have to switch to "Draw Baseline" just to nudge an already-placed one.
+      if (baseline) {
+        const hb = hitTestBaseline(c.x, c.y);
+        if (hb) {
+          baselineDragRef.current = { grabX: c.x, grabY: c.y, orig: { ...baseline } };
+          setDraggingBaseline(hb);
+          return;
+        }
+      }
+
+      if (photoMode === 'baseline') {
+        isDrawingBaseline.current = true;
+        setBaselineDraft({ x1: Math.round(c.x), x2: Math.round(c.x), y: Math.round(c.y) });
+      } else if (photoMode === 'draw') {
         setIsDrawing(true);
         setDrawStart({ x: c.x * scale, y: c.y * scale });
         setDrawCurrent({ x: c.x * scale, y: c.y * scale });
@@ -363,6 +449,38 @@ const WTMSlotEditor: React.FC<WTMSlotEditorProps> = ({ config, apiBaseUrl, onSav
       else setDesigCfg(p => ({ ...p, x: nx, y: ny }));
       setTextDirty(true);
       return;
+    }
+
+    // Move / resize a committed baseline (edge/thirds/center snapping applies).
+    if (draggingBaseline && baselineDragRef.current) {
+      const { grabX, grabY, orig } = baselineDragRef.current;
+      let next: Baseline;
+      if (draggingBaseline === 'move') {
+        const dx = Math.round(c.x - grabX), dy = Math.round(c.y - grabY);
+        const w = config.dimensions.width, h = config.dimensions.height;
+        const minX = Math.min(orig.x1, orig.x2), maxX = Math.max(orig.x1, orig.x2);
+        const clampedDx = Math.max(-minX, Math.min(w - maxX, dx));
+        const clampedDy = Math.max(-orig.y, Math.min(h - orig.y, dy));
+        next = { x1: orig.x1 + clampedDx, x2: orig.x2 + clampedDx, y: orig.y + clampedDy };
+      } else {
+        const nx = Math.round(Math.max(0, Math.min(config.dimensions.width, c.x)));
+        next = draggingBaseline === 'x1' ? { ...orig, x1: nx } : { ...orig, x2: nx };
+      }
+      setBaseline(snapBaselineToEdges(next));
+      setPhotoDirty(true);
+      return;
+    }
+
+    // Draw a new baseline: Y stays locked to the mousedown row (always horizontal).
+    if (isDrawingBaseline.current) {
+      setBaselineDraft(prev => prev ? snapBaselineToEdges({ ...prev, x2: Math.round(c.x) }) : prev);
+      return;
+    }
+
+    // Idle affordance: grab/resize cursor when hovering a baseline in the photo tab.
+    if (tab === 'photo' && baseline && !isDrawing && wordsDragMode === 'none') {
+      const hb = hitTestBaseline(c.x, c.y);
+      setBaselineHover(prev => (prev === hb ? prev : hb));
     }
 
     // Words tab drag operations
@@ -408,6 +526,31 @@ const WTMSlotEditor: React.FC<WTMSlotEditorProps> = ({ config, apiBaseUrl, onSav
   const handleMouseUp = () => {
     if (draggingText) {
       setDraggingText(null);
+      return;
+    }
+
+    // Baseline edit release — normalise so x1 stays the left endpoint, re-snap.
+    if (draggingBaseline) {
+      setBaseline(b => b ? snapBaselineToEdges({ x1: Math.min(b.x1, b.x2), x2: Math.max(b.x1, b.x2), y: b.y }) : b);
+      setDraggingBaseline(null);
+      baselineDragRef.current = null;
+      return;
+    }
+
+    // Baseline draw commit — discard if too short (an accidental click/tiny drag).
+    if (isDrawingBaseline.current) {
+      isDrawingBaseline.current = false;
+      setBaselineDraft(draft => {
+        if (draft && Math.abs(draft.x2 - draft.x1) > 20) {
+          const lo = Math.min(draft.x1, draft.x2), hi = Math.max(draft.x1, draft.x2);
+          setBaseline(snapBaselineToEdges({ x1: lo, x2: hi, y: draft.y }));
+          // Drawing a baseline IS the intent to use it — the backend only
+          // honours it when anchor_mode is 'baseline'.
+          setPhotoSlot(prev => prev ? { ...prev, anchor_mode: 'baseline' } : prev);
+          setPhotoDirty(true);
+        }
+        return null;
+      });
       return;
     }
 
@@ -469,6 +612,23 @@ const WTMSlotEditor: React.FC<WTMSlotEditorProps> = ({ config, apiBaseUrl, onSav
     setWordsDirty(true);
   };
 
+  const handleDuplicateWordSlot = (idx: number) => {
+    if (slots.length >= 6) return;
+    const src = slots[idx];
+    // Offset so the copy is visibly distinct and immediately draggable into
+    // place, clamped so it doesn't start off the template edge.
+    const nx = Math.max(0, Math.min(config.dimensions.width - src.width, src.x + 24));
+    const ny = Math.max(0, Math.min(config.dimensions.height - src.height, src.y + 24));
+    setSlots(prev => {
+      const next = [...prev, { ...src, x: nx, y: ny }];
+      // Re-derive id/order from position, same as delete/move-up — ids are
+      // always sequential slot_0..slot_N-1, never stable identities.
+      return next.map((s, i) => ({ ...s, order: i, id: `slot_${i}` }));
+    });
+    setSelectedSlotIndex(slots.length);
+    setWordsDirty(true);
+  };
+
   const handleMoveUp = (idx: number) => {
     if (idx === 0) return;
     setSlots(prev => {
@@ -505,7 +665,7 @@ const WTMSlotEditor: React.FC<WTMSlotEditorProps> = ({ config, apiBaseUrl, onSav
       const res = await fetch(`${apiBaseUrl}/api/admin/wtm/templates/${config.template_id}/photo-slot`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ photo_slot: photoSlot }),
+        body: JSON.stringify({ photo_slot: { ...photoSlot, baseline } }),
       });
       if (!res.ok) { const e = await res.json(); throw new Error(e.detail?.message || 'Failed to save'); }
       setPhotoDirty(false);
@@ -565,6 +725,11 @@ const WTMSlotEditor: React.FC<WTMSlotEditorProps> = ({ config, apiBaseUrl, onSav
     tab === 'text' ? (draggingText ? 'grabbing' : 'grab')
     : tab === 'settings' ? 'default'
     : tab === 'words' ? (wordsDragMode !== 'none' ? 'grabbing' : wordsCursor)
+    : draggingBaseline === 'move' ? 'grabbing'
+    : draggingBaseline ? 'ew-resize'
+    : baselineHover === 'move' ? 'grab'
+    : baselineHover ? 'ew-resize'
+    : photoMode === 'baseline' ? CROSSHAIR_CURSOR
     : photoMode === 'draw' ? CROSSHAIR_CURSOR
     : photoMode === 'anchor' ? 'pointer'
     : 'default';
@@ -589,10 +754,11 @@ const WTMSlotEditor: React.FC<WTMSlotEditorProps> = ({ config, apiBaseUrl, onSav
 
       {/* Instructions */}
       <div className={styles.instructions}>
-        {tab === 'words' && '💡 Click a slot to select it → drag to move, drag a corner handle to resize. Drag on empty space to draw a new slot (max 6).'}
+        {tab === 'words' && '💡 Click a slot to select it → drag to move, drag a corner handle to resize. Drag on empty space to draw a new slot, or ⧉ duplicate an existing one from the list (max 6).'}
         {tab === 'photo' && photoMode === 'draw' && '🖱️ Drag to draw the user photo slot rectangle.'}
         {tab === 'photo' && photoMode === 'anchor' && '🎯 Click inside the blue slot to reposition the face anchor point (yellow dot).'}
-        {tab === 'photo' && photoMode === 'select' && '👆 Switch to Draw or Anchor mode using the toolbar above.'}
+        {tab === 'photo' && photoMode === 'baseline' && '📏 Drag to draw a baseline · grab the line to move it / its ends to resize · snaps to edges/thirds/center.'}
+        {tab === 'photo' && photoMode === 'select' && '👆 Switch to Draw, Anchor, or Baseline mode using the toolbar above.'}
         {tab === 'settings' && '⚙️ Configure template-level behaviour settings.'}
         {tab === 'text' && '💬 Enable overlays, then drag the yellow (NAME) or green (DESIGNATION) markers to position them.'}
       </div>
@@ -604,7 +770,17 @@ const WTMSlotEditor: React.FC<WTMSlotEditorProps> = ({ config, apiBaseUrl, onSav
             <div className={styles.photoToolbar}>
               <button className={`${styles.toolBtn} ${photoMode === 'draw' ? styles.toolActive : ''}`} onClick={() => setPhotoMode('draw')}>✏️ Draw Slot</button>
               <button className={`${styles.toolBtn} ${photoMode === 'anchor' ? styles.toolActive : ''}`} onClick={() => setPhotoMode('anchor')} disabled={!photoSlot}>🎯 Set Anchor</button>
-              {photoSlot && <button className={styles.toolBtnDanger} onClick={() => { setPhotoSlot(null); setPhotoDirty(true); setPhotoMode('draw'); }}>🗑️ Clear</button>}
+              <button className={`${styles.toolBtn} ${photoMode === 'baseline' ? styles.toolActive : ''}`} onClick={() => setPhotoMode('baseline')} disabled={!photoSlot}
+                title="Draw the baseline: the subject's bottom sits on this line, centered on its midpoint, scaled to its length">
+                📏 Draw Baseline
+              </button>
+              {baseline && (
+                <button className={styles.toolBtnDanger} onClick={() => {
+                  setBaseline(null); setPhotoDirty(true);
+                  setPhotoSlot(prev => prev && prev.anchor_mode === 'baseline' ? { ...prev, anchor_mode: 'face_center' } : prev);
+                }}>🗑️ Clear Baseline</button>
+              )}
+              {photoSlot && <button className={styles.toolBtnDanger} onClick={() => { setPhotoSlot(null); setBaseline(null); setPhotoDirty(true); setPhotoMode('draw'); }}>🗑️ Clear</button>}
             </div>
           )}
           <img
@@ -621,7 +797,14 @@ const WTMSlotEditor: React.FC<WTMSlotEditorProps> = ({ config, apiBaseUrl, onSav
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
-            onMouseLeave={() => { setIsDrawing(false); if (wordsDragMode !== 'none') { setWordsDragMode('none'); setWordsDragIdx(null); } }}
+            onMouseLeave={() => {
+              setIsDrawing(false);
+              if (wordsDragMode !== 'none') { setWordsDragMode('none'); setWordsDragIdx(null); }
+              isDrawingBaseline.current = false;
+              setBaselineDraft(null);
+              setDraggingBaseline(null);
+              baselineDragRef.current = null;
+            }}
           />
         </div>
 
@@ -640,6 +823,9 @@ const WTMSlotEditor: React.FC<WTMSlotEditorProps> = ({ config, apiBaseUrl, onSav
                       <span className={styles.slotName}>Word {slot.order + 1}</span>
                       <div className={styles.slotControls}>
                         <button className={styles.controlBtn} onClick={e => { e.stopPropagation(); handleMoveUp(i); }}>↑</button>
+                        <button className={styles.controlBtn} disabled={slots.length >= 6}
+                          title={slots.length >= 6 ? 'Maximum 6 word slots' : 'Duplicate this slot'}
+                          onClick={e => { e.stopPropagation(); handleDuplicateWordSlot(i); }}>⧉</button>
                         <button className={`${styles.controlBtn} ${styles.deleteBtn}`} onClick={e => { e.stopPropagation(); handleDeleteWordSlot(i); }}>🗑️</button>
                       </div>
                     </div>
@@ -709,12 +895,49 @@ const WTMSlotEditor: React.FC<WTMSlotEditorProps> = ({ config, apiBaseUrl, onSav
                       value={photoSlot.anchor_mode}
                       onChange={e => { setPhotoSlot(prev => prev ? { ...prev, anchor_mode: e.target.value as PhotoSlotDefinition['anchor_mode'] } : prev); setPhotoDirty(true); }}
                     >
+                      <option value="baseline">Baseline (Robust auto-place) ⭐</option>
                       <option value="face_center">Face Center</option>
                       <option value="eyes">Eyes</option>
                       <option value="full_frame">Full Frame (Green screen)</option>
                       <option value="none">None (Bottom anchor)</option>
                     </select>
                   </div>
+
+                  {photoSlot.anchor_mode === 'baseline' && (
+                    <div className={styles.settingRow} style={{ background: 'rgba(34,211,238,0.1)', borderRadius: 6, padding: '8px 10px', flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+                      <span style={{ fontSize: '0.78rem', color: '#67e8f9' }}>
+                        📏 Robust placement: the cutout is auto-scaled &amp; grounded on the baseline (no face detection).
+                        {baseline ? ' Type exact values below, or drag the line with the Draw Baseline tool.' : ' Click "Draw Baseline" above, then drag a horizontal line where the subject should stand.'}
+                      </span>
+                      {baseline && (() => {
+                        const clampX = (v: number) => Math.max(0, Math.min(config.dimensions.width, Math.round(v)));
+                        const clampY = (v: number) => Math.max(0, Math.min(config.dimensions.height, Math.round(v)));
+                        const numStyle: React.CSSProperties = { width: 72 };
+                        return (
+                          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', color: '#94a3b8' }}>
+                              y
+                              <input type="number" value={Math.round(baseline.y)} style={numStyle}
+                                onChange={e => { setBaseline(b => b ? { ...b, y: clampY(+e.target.value || 0) } : b); setPhotoDirty(true); }} />
+                            </label>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', color: '#94a3b8' }}>
+                              x1
+                              <input type="number" value={Math.round(baseline.x1)} style={numStyle}
+                                onChange={e => { setBaseline(b => b ? { ...b, x1: clampX(+e.target.value || 0) } : b); setPhotoDirty(true); }} />
+                            </label>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', color: '#94a3b8' }}>
+                              x2
+                              <input type="number" value={Math.round(baseline.x2)} style={numStyle}
+                                onChange={e => { setBaseline(b => b ? { ...b, x2: clampX(+e.target.value || 0) } : b); setPhotoDirty(true); }} />
+                            </label>
+                            <span style={{ fontSize: '0.7rem', color: '#64748b', alignSelf: 'center' }}>
+                              width {Math.abs(baseline.x2 - baseline.x1)}px
+                            </span>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
 
                   {/* Face ratio */}
                   <div className={styles.settingRow}>

@@ -45,6 +45,8 @@ export interface SlotDefinition {
   rotation: number; // degrees, clockwise positive, default 0
 }
 
+export interface Baseline { x1: number; x2: number; y: number }
+
 export interface PhotoSlotDefinition {
   x: number;
   y: number;
@@ -52,11 +54,15 @@ export interface PhotoSlotDefinition {
   height: number;
   anchor_x: number;           // relative within slot (0-1), default 0.5
   anchor_y: number;           // relative within slot (0-1), default 0.35
-  anchor_mode: 'face_center' | 'eyes' | 'none' | 'full_frame';
+  anchor_mode: 'face_center' | 'eyes' | 'none' | 'full_frame' | 'baseline';
   desired_face_ratio: number; // face height as ratio of slot height, e.g. 0.35
   min_zoom: number;           // default 0.5
   max_zoom: number;           // default 3.0
   sticker_filter: 'none' | 'bw' | 'sketch';
+  // Baseline placement (anchor_mode === 'baseline'): the subject's cutout is
+  // auto-scaled and grounded on this line — see TemplateEditor.tsx's baseline
+  // tool for the reference implementation this mirrors.
+  baseline?: Baseline | null;
 }
 
 // ── Admin-only types ───────────────────────────────────────────────────

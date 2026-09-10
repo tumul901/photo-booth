@@ -64,7 +64,7 @@ export default function PreviewEditScreen({
 
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const [scale, setScale] = useState(1);
-  const [snapEnabled, setSnapEnabled] = useState(true);
+  const [snapEnabled, setSnapEnabled] = useState(false);
   const [renderBox, setRenderBox] = useState<RenderBox | null>(null);
 
   const isDragging = useRef(false);

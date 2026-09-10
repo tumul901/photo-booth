@@ -31,17 +31,52 @@ const WTMWordManager: React.FC<WTMWordManagerProps> = ({ config, apiBaseUrl, onC
 
   const [fonts, setFonts] = useState<FontOption[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [isUploadingFont, setIsUploadingFont] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const fetchFonts = () =>
     fetch(`${apiBaseUrl}/api/admin/wtm/fonts`)
       .then(r => r.json())
       .then(d => {
         setFonts(d.fonts ?? []);
-        if (d.fonts?.length && !textFont) setTextFont(d.fonts[0].name);
+        return d.fonts as FontOption[] | undefined;
       })
-      .catch(() => {});
+      .catch(() => undefined);
+
+  useEffect(() => {
+    fetchFonts().then(list => {
+      if (list?.length && !textFont) setTextFont(list[0].name);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiBaseUrl]);
+
+  const handleUploadFont = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same filename later
+    if (!file) return;
+    const lower = file.name.toLowerCase();
+    if (!lower.endsWith('.ttf') && !lower.endsWith('.otf')) {
+      setError('Only .ttf or .otf font files are allowed.');
+      return;
+    }
+
+    setIsUploadingFont(true); setError(null);
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      // The regular (non-WTM) admin endpoint — it already validates the font
+      // loads with PIL and writes to backend/fonts/, the same directory
+      // wtm_utils.list_available_fonts() scans. No WTM-specific upload route
+      // needed; adding one would just be a second path to the same files.
+      const res = await fetch(`${apiBaseUrl}/api/admin/fonts`, { method: 'POST', body: formData });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || 'Font upload failed'); }
+      const data = await res.json();
+      await fetchFonts();
+      setTextFont(data.name);
+    } catch (err: any) { setError(err.message); }
+    finally { setIsUploadingFont(false); }
+  };
 
   const reloadConfig = async () => {
     try {
@@ -186,10 +221,17 @@ const WTMWordManager: React.FC<WTMWordManagerProps> = ({ config, apiBaseUrl, onC
               </div>
               <div className={styles.inputGroup}>
                 <label className={styles.label}>Font</label>
-                <select className={styles.input} value={textFont} onChange={e => setTextFont(e.target.value)} required>
-                  {fonts.length === 0 && <option value="">No fonts found</option>}
-                  {fonts.map(f => <option key={f.name} value={f.name}>{f.display}</option>)}
-                </select>
+                <div className={styles.colorRow}>
+                  <select className={styles.input} value={textFont} onChange={e => setTextFont(e.target.value)}
+                    required style={{ flex: 1 }}>
+                    {fonts.length === 0 && <option value="">No fonts found</option>}
+                    {fonts.map(f => <option key={f.name} value={f.name}>{f.display}</option>)}
+                  </select>
+                  <label className={styles.fileButton}>
+                    {isUploadingFont ? 'Uploading…' : '+ Upload Font'}
+                    <input type="file" accept=".ttf,.otf" onChange={handleUploadFont} hidden disabled={isUploadingFont} />
+                  </label>
+                </div>
               </div>
               <div className={styles.inputGroup}>
                 <label className={styles.label}>Color</label>
