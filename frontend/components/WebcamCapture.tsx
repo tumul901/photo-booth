@@ -79,6 +79,20 @@ function CameraOffIcon() {
   );
 }
 
+function MirrorIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m3 7 5 5-5 5V7" />
+      <path d="m21 7-5 5 5 5V7" />
+      <path d="M12 20v2" />
+      <path d="M12 14v2" />
+      <path d="M12 8v2" />
+      <path d="M12 2v2" />
+      {!active && <line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" strokeWidth="2" />}
+    </svg>
+  );
+}
+
 interface WebcamCaptureProps {
   selectedTemplate?: string;
   onCapture: (imageData: string) => void;
@@ -118,12 +132,18 @@ export default function WebcamCapture({
   const [zoomRange, setZoomRange] = useState({ min: 1, max: 1 });
   const [hasZoom, setHasZoom] = useState(false);
 
-  // Always mirrored, no per-guest toggle — a selfie-style preview that moves
-  // opposite to what the guest expects is disorienting, and facingMode isn't a
-  // reliable enough signal to gate it on (a single-camera laptop grants its only
-  // camera regardless of the requested 'environment' hint, so facingMode never
-  // reflects whether the feed is actually a front-facing selfie).
-  const isMirrored = mirrored;
+  // Mirroring state defaults to prop (typically true for selfie cameras),
+  // but can be toggled by the guest so text/graphics on shirts are not reversed.
+  const [isMirrored, setIsMirrored] = useState(mirrored);
+
+  // Synchronize when the mirrored prop changes from the parent
+  useEffect(() => {
+    setIsMirrored(mirrored);
+  }, [mirrored]);
+
+  const toggleMirror = useCallback(() => {
+    setIsMirrored(prev => !prev);
+  }, []);
 
   // Helper to toggle between front/back cameras
   const toggleCamera = useCallback(() => {
@@ -348,7 +368,24 @@ export default function WebcamCapture({
       >
         {isReady && !error && (
           <div className={styles.topControls}>
-            <button className={styles.flipButton} onClick={toggleCamera} aria-label="Switch camera">
+            <button
+              type="button"
+              className={`${styles.mirrorButton} ${isMirrored ? styles.mirrorButtonActive : ''}`}
+              onClick={toggleMirror}
+              disabled={countdown !== null}
+              aria-label={isMirrored ? 'Disable mirror mode' : 'Enable mirror mode'}
+              title={isMirrored ? 'Mirror: ON (Click to un-mirror for normal text)' : 'Mirror: OFF (Click to mirror)'}
+            >
+              <MirrorIcon active={isMirrored} />
+            </button>
+            <button
+              type="button"
+              className={styles.flipButton}
+              onClick={toggleCamera}
+              disabled={countdown !== null}
+              aria-label="Switch camera"
+              title="Switch camera"
+            >
               <SwitchCameraIcon />
             </button>
           </div>
